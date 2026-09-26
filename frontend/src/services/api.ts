@@ -1,6 +1,12 @@
 import { CitizenReportDraft, ApiSubmissionStatus, PublicReportPayload, SubmitReportOutcome, PublicRequestResponse } from '../types';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const baseUrl = import.meta.env.VITE_API_BASE_URL;
+
+if (!baseUrl) {
+  throw new Error("VITE_API_BASE_URL is not defined in the environment. Please configure it in your .env file.");
+}
+
+export const API_BASE_URL = baseUrl;
 
 /**
  * Health check helper to verify backend availability.
