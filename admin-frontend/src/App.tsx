@@ -133,6 +133,7 @@ function App() {
 
   const [coverageState, setCoverageState] = useState<ConnectionState>('loading')
   const [coverage, setCoverage] = useState<NeedCoverage[]>([])
+  const [coverageSummary, setCoverageSummary] = useState({ total_verified: 0, total_delivered: 0, total_uncovered: 0 })
   const [coverageError, setCoverageError] = useState<string>('')
 
   const [allocationsState, setAllocationsState] = useState<ConnectionState>('loading')
@@ -261,6 +262,7 @@ function App() {
         const data = await response.json()
         if (!ignore) {
           setCoverage(data.needs)
+          setCoverageSummary({ total_verified: data.total_verified, total_delivered: data.total_delivered, total_uncovered: data.total_uncovered })
           setCoverageState('connected')
         }
       } catch (err) {
@@ -378,6 +380,7 @@ function App() {
       if (!response.ok) throw new Error(`Coverage API returned ${response.status}`)
       const data = await response.json()
       setCoverage(data.needs)
+      setCoverageSummary({ total_verified: data.total_verified, total_delivered: data.total_delivered, total_uncovered: data.total_uncovered })
       setCoverageState('connected')
     } catch (err) {
       setCoverageState('failed')
@@ -1082,30 +1085,70 @@ function App() {
         {coverageState === 'loading' && <div className="loading-state">Loading coverage...</div>}
         {coverageState === 'failed' && <div className="error-state"><strong>Error:</strong> {coverageError}</div>}
         {coverageState === 'connected' && (
-          <div className="reports-grid">
-            {coverage.map(need => (
-              <div key={need.need_id} className="report-card">
+          <>
+            <div className="reports-grid" style={{ marginBottom: '2rem' }}>
+              <div className="report-card" style={{ gridColumn: '1 / -1', background: 'var(--bg-dark)', border: '1px solid var(--panel-border)' }}>
                 <div className="report-header">
                   <div className="report-title">
-                    <span className="report-id">Need #{need.need_id}</span>
-                    <span>Report #{need.report_id}</span>
-                  </div>
-                  <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: need.coverage_percent >= 100 ? '#10b981' : '#f59e0b' }}>
-                    {need.coverage_percent}% Covered
+                    <span>Coverage Summary</span>
                   </div>
                 </div>
                 <div className="report-body">
-                  <div className="report-meta-grid">
-                    <div className="report-meta-item"><span className="report-meta-label">Verified Qty</span><span className="report-meta-value">{need.verified_quantity} {need.unit}</span></div>
-                    <div className="report-meta-item"><span className="report-meta-label">Allocated Qty</span><span className="report-meta-value">{need.allocated_quantity} {need.unit}</span></div>
-                    <div className="report-meta-item"><span className="report-meta-label">Delivered Qty</span><span className="report-meta-value">{need.delivered_quantity} {need.unit}</span></div>
-                    <div className="report-meta-item"><span className="report-meta-label">Remaining to Allocate</span><span className="report-meta-value">{need.remaining_to_allocate} {need.unit}</span></div>
-                    <div className="report-meta-item"><span className="report-meta-label">Uncovered Qty</span><span className="report-meta-value">{need.uncovered_quantity} {need.unit}</span></div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', textAlign: 'center' }}>
+                    <div style={{ padding: '1rem', background: 'var(--panel-bg)', borderRadius: '0.25rem', border: '1px solid var(--panel-border)' }}>
+                      <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Total Verified Requirement</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--text-main)' }}>{coverageSummary.total_verified}</div>
+                    </div>
+                    <div style={{ padding: '1rem', background: 'var(--panel-bg)', borderRadius: '0.25rem', border: '1px solid #3b82f6' }}>
+                      <div style={{ fontSize: '0.875rem', color: '#3b82f6', marginBottom: '0.5rem' }}>Total Delivered</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#3b82f6' }}>{coverageSummary.total_delivered}</div>
+                    </div>
+                    <div style={{ padding: '1rem', background: 'var(--panel-bg)', borderRadius: '0.25rem', border: '1px solid #ef4444' }}>
+                      <div style={{ fontSize: '0.875rem', color: '#ef4444', marginBottom: '0.5rem' }}>Total Uncovered</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#ef4444' }}>{coverageSummary.total_uncovered}</div>
+                    </div>
                   </div>
+                  {coverageSummary.total_uncovered === 0 && coverageSummary.total_verified > 0 && (
+                    <div className="success-message" style={{ marginTop: '1rem', textAlign: 'center' }}>
+                      All verified needs are fully covered.
+                    </div>
+                  )}
                 </div>
               </div>
-            ))}
-          </div>
+            </div>
+
+            <div className="reports-grid">
+              {coverage.map(need => {
+                const isUncovered = need.uncovered_quantity > 0;
+                return (
+                  <div key={need.need_id} className="report-card" style={{ border: isUncovered ? '1px solid #ef4444' : '1px solid #10b981' }}>
+                    <div className="report-header">
+                      <div className="report-title">
+                        <span className="report-id">Need #{need.need_id}</span>
+                        <span>Report #{need.report_id}</span>
+                        {isUncovered && <span className="report-type-badge" style={{ backgroundColor: '#ef4444' }}>Uncovered</span>}
+                      </div>
+                      <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: need.coverage_percent >= 100 ? '#10b981' : '#f59e0b' }}>
+                        {need.coverage_percent}% Covered
+                      </div>
+                    </div>
+                    <div className="report-body">
+                      <div style={{ width: '100%', height: '8px', background: 'var(--bg-dark)', borderRadius: '4px', marginBottom: '1rem', overflow: 'hidden' }}>
+                        <div style={{ width: `${Math.min(need.coverage_percent, 100)}%`, height: '100%', background: need.coverage_percent >= 100 ? '#10b981' : '#f59e0b', transition: 'width 0.3s' }}></div>
+                      </div>
+                      <div className="report-meta-grid">
+                        <div className="report-meta-item"><span className="report-meta-label">Verified Qty</span><span className="report-meta-value">{need.verified_quantity} {need.unit}</span></div>
+                        <div className="report-meta-item"><span className="report-meta-label">Delivered Qty</span><span className="report-meta-value" style={{ color: '#3b82f6', fontWeight: 'bold' }}>{need.delivered_quantity} {need.unit}</span></div>
+                        <div className="report-meta-item"><span className="report-meta-label">Uncovered Qty</span><span className="report-meta-value" style={{ color: isUncovered ? '#ef4444' : 'inherit', fontWeight: isUncovered ? 'bold' : 'normal' }}>{need.uncovered_quantity} {need.unit}</span></div>
+                        <div className="report-meta-item" style={{ borderTop: '1px solid var(--panel-border)', paddingTop: '0.5rem', marginTop: '0.5rem' }}><span className="report-meta-label">Allocated Qty</span><span className="report-meta-value">{need.allocated_quantity} {need.unit}</span></div>
+                        <div className="report-meta-item" style={{ borderTop: '1px solid var(--panel-border)', paddingTop: '0.5rem', marginTop: '0.5rem' }}><span className="report-meta-label">Remaining to Allocate</span><span className="report-meta-value">{need.remaining_to_allocate} {need.unit}</span></div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </>
         )}
 
         <div className="section-header" style={{ marginTop: '3rem' }}>
