@@ -1883,3 +1883,321 @@ textarea:focus-visible {
     width: 100%;
   }
 }
+/* ==========================================================================
+   BATCH 3 UI POLISH OVERRIDES
+   ========================================================================== */
+
+/* Target 1 - Request Help & Forms */
+.page-title {
+  font-size: 36px !important;
+  font-weight: 900 !important;
+  color: var(--primary-800) !important;
+  letter-spacing: -0.8px !important;
+  margin-bottom: 12px !important;
+}
+
+.page-subtitle {
+  font-size: 18px !important;
+  line-height: 1.6 !important;
+  color: var(--slate-600) !important;
+}
+
+.form-section-card {
+  border: 1px solid var(--slate-200) !important;
+  border-top: 4px solid var(--primary-600) !important;
+  box-shadow: var(--shadow-md) !important;
+  padding: 32px !important;
+  border-radius: var(--radius-lg) !important;
+  transition: box-shadow 0.2s ease !important;
+}
+
+.form-section-card:hover {
+  box-shadow: var(--shadow-lg) !important;
+}
+
+.card-heading {
+  font-size: 20px !important;
+  font-weight: 800 !important;
+  color: var(--primary-800) !important;
+  margin-bottom: 24px !important;
+  border-bottom: 2px solid var(--slate-100) !important;
+  padding-bottom: 12px !important;
+}
+
+.form-label {
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  color: var(--slate-800) !important;
+  margin-bottom: 8px !important;
+}
+
+.form-input {
+  padding: 12px 16px !important;
+  border: 2px solid var(--slate-200) !important;
+  border-radius: var(--radius-md) !important;
+  font-size: 15px !important;
+  transition: all 0.2s ease !important;
+  background-color: #fcfcfc !important;
+}
+
+.form-input:focus {
+  border-color: var(--primary-500) !important;
+  background-color: #ffffff !important;
+  box-shadow: 0 0 0 3px rgba(36, 91, 148, 0.1) !important;
+  outline: none !important;
+}
+
+.form-input:disabled {
+  background-color: var(--slate-100) !important;
+  color: var(--slate-500) !important;
+  cursor: not-allowed !important;
+}
+
+.form-textarea {
+  min-height: 120px !important;
+}
+
+.req-star {
+  color: var(--emergency-600) !important;
+  font-weight: 900 !important;
+  margin-left: 4px !important;
+}
+
+.type-radio-card {
+  border: 2px solid var(--slate-200) !important;
+  padding: 20px !important;
+}
+
+.type-radio-card.type-card-active {
+  border-color: var(--primary-600) !important;
+  background-color: var(--primary-50) !important;
+  box-shadow: 0 4px 12px rgba(36, 91, 148, 0.1) !important;
+}
+
+.type-title {
+  font-size: 18px !important;
+  font-weight: 800 !important;
+}
+
+/* Location Section Polish */
+.location-picker-card, .map-card {
+  border-top: 4px solid var(--primary-500) !important;
+  box-shadow: var(--shadow-md) !important;
+  padding: 24px !important;
+}
+
+.location-title {
+  font-size: 20px !important;
+  font-weight: 800 !important;
+}
+
+.location-details-box {
+  background-color: var(--primary-50) !important;
+  border: 1px solid var(--primary-100) !important;
+  padding: 20px !important;
+}
+
+.detail-label {
+  color: var(--primary-700) !important;
+  font-size: 13px !important;
+}
+
+.detail-value {
+  font-size: 16px !important;
+}
+
+/* Submit Actions */
+.form-actions-card {
+  background-color: var(--slate-50) !important;
+  border: 1px solid var(--slate-200) !important;
+  border-radius: var(--radius-lg) !important;
+  padding: 24px !important;
+  justify-content: flex-end !important;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.02) !important;
+}
+
+.btn-lg {
+  padding: 16px 32px !important;
+  font-size: 16px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.5px !important;
+  text-transform: uppercase !important;
+}
+
+.btn-primary:disabled {
+  background-color: var(--slate-400) !important;
+  border-color: var(--slate-400) !important;
+  color: #ffffff !important;
+  opacity: 1 !important;
+}
+
+/* Target 2 - Success / Request Created */
+.success-state-container {
+  padding: 64px 32px !important;
+  border: none !important;
+  border-top: 6px solid var(--success-600) !important;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.08) !important;
+  max-width: 680px !important;
+}
+
+.success-state-container .notice-icon {
+  font-size: 64px !important;
+  margin-bottom: 24px !important;
+}
+
+.success-state-container h2 {
+  font-size: 32px !important;
+  font-weight: 900 !important;
+  letter-spacing: -0.5px !important;
+  margin-bottom: 12px !important;
+}
+
+.request-id-display {
+  background: linear-gradient(135deg, var(--primary-50) 0%, var(--slate-50) 100%) !important;
+  border: 2px dashed var(--primary-300) !important;
+  padding: 32px !important;
+  border-radius: 12px !important;
+  margin: 32px 0 !important;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.02) !important;
+}
+
+.request-id-label {
+  color: var(--primary-700) !important;
+  font-size: 15px !important;
+  letter-spacing: 1px !important;
+  margin-bottom: 8px !important;
+}
+
+.request-id-val {
+  font-size: 48px !important;
+  font-weight: 900 !important;
+  color: var(--primary-800) !important;
+  font-family: monospace !important;
+  letter-spacing: 2px !important;
+  display: block !important;
+}
+
+/* Target 3 - Track Request */
+.track-card {
+  border-top: 4px solid var(--primary-600) !important;
+  box-shadow: var(--shadow-md) !important;
+  padding: 40px !important;
+}
+
+.track-search-form .form-label {
+  font-size: 16px !important;
+}
+
+.track-search-form .form-input {
+  font-size: 18px !important;
+  padding: 14px 20px !important;
+  font-weight: 700 !important;
+  font-family: monospace !important;
+  letter-spacing: 1px !important;
+}
+
+.track-search-form .btn {
+  padding: 0 32px !important;
+  font-size: 16px !important;
+}
+
+.track-status-box {
+  background-color: #ffffff !important;
+  border: 1px solid var(--slate-200) !important;
+  border-left: 6px solid var(--primary-600) !important;
+  box-shadow: var(--shadow-md) !important;
+  padding: 32px !important;
+  margin-top: 32px !important;
+}
+
+.status-badge {
+  display: inline-block !important;
+  padding: 6px 16px !important;
+  border-radius: var(--radius-full) !important;
+  font-weight: 800 !important;
+  font-size: 15px !important;
+  letter-spacing: 0.5px !important;
+  background-color: var(--primary-100) !important;
+  color: var(--primary-800) !important;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05) !important;
+  border: 1px solid var(--primary-200) !important;
+}
+
+/* Match statuses visually, if possible we style based on content or general class. The component renders formatStatus output into .status-badge.
+Wait, .status-badge just has capitalize. Let's make it look solid. */
+
+.preview-body.mt-3 {
+  background-color: var(--slate-50) !important;
+  border: 1px solid var(--slate-200) !important;
+  border-radius: var(--radius-md) !important;
+  padding: 24px !important;
+}
+
+.preview-item {
+  margin-bottom: 16px !important;
+  border-bottom: 1px solid var(--slate-200) !important;
+  padding-bottom: 16px !important;
+}
+
+.preview-item:last-child {
+  margin-bottom: 0 !important;
+  border-bottom: none !important;
+  padding-bottom: 0 !important;
+}
+
+.preview-label {
+  font-size: 13px !important;
+  color: var(--slate-600) !important;
+  margin-bottom: 4px !important;
+}
+
+.preview-val {
+  font-size: 16px !important;
+  color: var(--slate-900) !important;
+}
+
+/* Target 4 - Mobile */
+@media (max-width: 768px) {
+  .page-title {
+    font-size: 28px !important;
+  }
+
+  .form-section-card {
+    padding: 20px !important;
+  }
+
+  .form-actions-card {
+    padding: 16px !important;
+    flex-direction: column !important;
+  }
+
+  .form-actions-card .btn {
+    width: 100% !important;
+  }
+
+  .success-state-container {
+    padding: 32px 20px !important;
+  }
+
+  .request-id-val {
+    font-size: 32px !important;
+  }
+
+  .track-card {
+    padding: 24px !important;
+  }
+
+  .track-search-form .input-group {
+    flex-direction: column !important;
+  }
+
+  .track-search-form .btn {
+    width: 100% !important;
+    padding: 14px 20px !important;
+    margin-top: 8px !important;
+  }
+
+  .track-status-box {
+    padding: 20px !important;
+  }
+}
