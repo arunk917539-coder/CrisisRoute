@@ -42,3 +42,13 @@ class ReportCreate(BaseModel):
     evidence_status: str = Field(default="none", pattern="^(none|photo|document|other)$")
     evidence_source: str = Field(min_length=2, max_length=200)
     evidence_note: str = Field(default="", max_length=1000)
+
+class PublicReportCreate(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    report_type: str = Field(pattern="^(relief|emergency)$")
+    category: str = Field(min_length=2, max_length=80)
+    description: str = Field(min_length=5, max_length=500)
+    location: str = Field(min_length=2, max_length=200)
+    people_affected: int = Field(ge=0, le=10_000_000)
+    required_quantity: float = Field(ge=0, le=1_000_000_000)
