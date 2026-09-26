@@ -88,6 +88,11 @@ function App() {
   const [evidenceReviewError, setEvidenceReviewError] = useState<string>('')
   const [evidenceReviewSuccess, setEvidenceReviewSuccess] = useState<string>('')
 
+  const [needQuantity, setNeedQuantity] = useState<number | ''>('')
+  const [creatingNeed, setCreatingNeed] = useState<boolean>(false)
+  const [needError, setNeedError] = useState<string>('')
+  const [needSuccess, setNeedSuccess] = useState<string>('')
+
   useEffect(() => {
     let ignore = false
 
@@ -288,6 +293,47 @@ function App() {
     }
   }
 
+  const submitNeed = async () => {
+    if (!selectedReport) return
+    if (needQuantity === '' || needQuantity <= 0) {
+      setNeedError('Quantity must be greater than 0')
+      return
+    }
+    if (needQuantity > selectedReport.required_quantity) {
+      setNeedError('Verified quantity cannot exceed requested quantity')
+      return
+    }
+    
+    setCreatingNeed(true)
+    setNeedError('')
+    setNeedSuccess('')
+    try {
+      const response = await fetch(`${API_BASE_URL}/needs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          report_id: selectedReport.id,
+          verified_quantity: Number(needQuantity),
+          unit: 'units'
+        })
+      })
+      if (!response.ok) {
+        const errData = await response.json().catch(() => null)
+        throw new Error(errData?.detail || `API returned ${response.status}`)
+      }
+      
+      const data = await response.json()
+      setNeedSuccess(`Successfully created Verified Need #${data.id} (${data.verified_quantity} ${data.unit})`)
+      
+      setSelectedReport({ ...selectedReport, verification_status: 'verified' })
+      handleRefreshData()
+    } catch (err) {
+      setNeedError(err instanceof Error ? err.message : 'Failed to create verified need')
+    } finally {
+      setCreatingNeed(false)
+    }
+  }
+
   const handleOpenReport = async (report: Report) => {
     setSelectedReport(report)
     setEvidenceState('loading')
@@ -295,6 +341,10 @@ function App() {
     setEvidenceData(null)
     setEvidenceReviewError('')
     setEvidenceReviewSuccess('')
+    setNeedQuantity(report.required_quantity)
+    setCreatingNeed(false)
+    setNeedError('')
+    setNeedSuccess('')
     
     try {
       const response = await fetch(`${API_BASE_URL}/reports/${report.id}/evidence`)
@@ -312,6 +362,8 @@ function App() {
     setSelectedReport(null)
     setEvidenceReviewError('')
     setEvidenceReviewSuccess('')
+    setNeedError('')
+    setNeedSuccess('')
   }
 
   return (
@@ -737,6 +789,50 @@ function App() {
                   </div>
                 )}
               </div>
+
+              {selectedReport.report_type === 'relief' && selectedReport.verification_status !== 'verified' && (
+                <div className="evidence-section" style={{ marginTop: '1.5rem', backgroundColor: 'rgba(217, 119, 6, 0.1)', borderColor: 'rgba(217, 119, 6, 0.3)' }}>
+                  <div className="evidence-title" style={{ color: '#fcd34d' }}>Create Verified Need</div>
+                  <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                    Evidence must be reviewed before creating a verified need. Confirm the quantity before submitting.
+                  </p>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Verified Quantity</label>
+                    <input 
+                      type="number" 
+                      value={needQuantity} 
+                      onChange={e => setNeedQuantity(e.target.value === '' ? '' : Number(e.target.value))} 
+                      max={selectedReport.required_quantity}
+                      min={1}
+                      style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }}
+                    />
+                  </div>
+                  
+                  {needError && (
+                    <div className="error-state" style={{ padding: '0.75rem', marginTop: '1rem', marginBottom: 0 }}>
+                      <strong>Error:</strong> {needError}
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: '1rem' }}>
+                    <button 
+                      className="btn-action confirm" 
+                      onClick={submitNeed}
+                      disabled={creatingNeed}
+                      style={{ backgroundColor: '#d97706', width: '100%' }}
+                    >
+                      {creatingNeed ? 'Creating...' : 'Create Verified Need'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              
+              {needSuccess && (
+                <div className="success-message" style={{ marginTop: '1.5rem' }}>
+                  {needSuccess}
+                </div>
+              )}
             </div>
           </div>
         </div>
