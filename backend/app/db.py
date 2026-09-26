@@ -31,9 +31,21 @@ def ensure_schema():
     with engine.begin() as conn:
         if "is_synthetic" not in report_columns:
             conn.execute(text("ALTER TABLE reports ADD COLUMN is_synthetic BOOLEAN NOT NULL DEFAULT 1"))
+        if "latitude" not in report_columns:
+            conn.execute(text("ALTER TABLE reports ADD COLUMN latitude FLOAT"))
+        if "longitude" not in report_columns:
+            conn.execute(text("ALTER TABLE reports ADD COLUMN longitude FLOAT"))
+
         need_columns = {c["name"] for c in inspector.get_columns("needs")}
         if "unit" not in need_columns:
             conn.execute(text("ALTER TABLE needs ADD COLUMN unit VARCHAR NOT NULL DEFAULT 'units'"))
+
+        resource_columns = {c["name"] for c in inspector.get_columns("resources")}
+        if "latitude" not in resource_columns:
+            conn.execute(text("ALTER TABLE resources ADD COLUMN latitude FLOAT"))
+        if "longitude" not in resource_columns:
+            conn.execute(text("ALTER TABLE resources ADD COLUMN longitude FLOAT"))
+
         delivery_columns = {c["name"] for c in inspector.get_columns("deliveries")}
         if "allocation_id" not in delivery_columns:
             conn.execute(text("ALTER TABLE deliveries ADD COLUMN allocation_id INTEGER"))
