@@ -1040,12 +1040,12 @@ function App() {
               </div>
               <div className="report-body">
                 <form onSubmit={submitResource} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  <input type="text" placeholder="Resource Name (e.g. Water Bottles)" value={newResource.name} onChange={e => setNewResource({...newResource, name: e.target.value})} required minLength={2} className="input-field" style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
-                  <input type="text" placeholder="Resource Type (e.g. supplies)" value={newResource.resource_type} onChange={e => setNewResource({...newResource, resource_type: e.target.value})} required minLength={2} className="input-field" style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
-                  <input type="text" placeholder="Unit (e.g. liters)" value={newResource.unit} onChange={e => setNewResource({...newResource, unit: e.target.value})} required minLength={1} className="input-field" style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
-                  <input type="text" placeholder="Location" value={newResource.location} onChange={e => setNewResource({...newResource, location: e.target.value})} required minLength={2} className="input-field" style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
-                  <input type="number" placeholder="Available Quantity" value={newResource.available_quantity} onChange={e => setNewResource({...newResource, available_quantity: e.target.value === '' ? '' : Number(e.target.value)})} required min={1} className="input-field" style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
-                  <input type="text" placeholder="Source (e.g. Warehouse A)" value={newResource.source} onChange={e => setNewResource({...newResource, source: e.target.value})} required minLength={2} className="input-field" style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
+                  <input type="text" placeholder="Resource Name (e.g. Water Bottles)" value={newResource.name} onChange={e => setNewResource({...newResource, name: e.target.value})} required minLength={2} className="input-field" />
+                  <input type="text" placeholder="Resource Type (e.g. supplies)" value={newResource.resource_type} onChange={e => setNewResource({...newResource, resource_type: e.target.value})} required minLength={2} className="input-field" />
+                  <input type="text" placeholder="Unit (e.g. liters)" value={newResource.unit} onChange={e => setNewResource({...newResource, unit: e.target.value})} required minLength={1} className="input-field" />
+                  <input type="text" placeholder="Location" value={newResource.location} onChange={e => setNewResource({...newResource, location: e.target.value})} required minLength={2} className="input-field" />
+                  <input type="number" placeholder="Available Quantity" value={newResource.available_quantity} onChange={e => setNewResource({...newResource, available_quantity: e.target.value === '' ? '' : Number(e.target.value)})} required min={1} className="input-field" />
+                  <input type="text" placeholder="Source (e.g. Warehouse A)" value={newResource.source} onChange={e => setNewResource({...newResource, source: e.target.value})} required minLength={2} className="input-field" />
                   {addResourceError && <div className="error-state" style={{ padding: '0.5rem', margin: 0 }}>{addResourceError}</div>}
                   {addResourceSuccess && <div className="success-message" style={{ padding: '0.5rem', margin: 0 }}>{addResourceSuccess}</div>}
                   <button type="submit" className="btn-action confirm" disabled={addingResource}>
@@ -1164,7 +1164,7 @@ function App() {
                     setAllocNeedId(e.target.value === '' ? '' : Number(e.target.value))
                     setAllocResourceId('')
                     setAllocQuantity('')
-                  }} required style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }}>
+                  }} required>
                     <option value="">-- Select Need --</option>
                     {coverage.filter(n => n.remaining_to_allocate > 0).map(n => (
                       <option key={n.need_id} value={n.need_id}>Need #{n.need_id} (Needs {n.remaining_to_allocate} {n.unit})</option>
@@ -1174,7 +1174,7 @@ function App() {
                 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <label className="report-meta-label">Select Resource</label>
-                  <select className="input-field" value={allocResourceId} onChange={e => setAllocResourceId(e.target.value === '' ? '' : Number(e.target.value))} required disabled={!allocNeedId} style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)', opacity: !allocNeedId ? 0.5 : 1 }}>
+                  <select className="input-field" value={allocResourceId} onChange={e => setAllocResourceId(e.target.value === '' ? '' : Number(e.target.value))} required disabled={!allocNeedId}>
                     <option value="">-- Select Resource --</option>
                     {allocNeedId && resources.filter(r => r.status === 'active' && r.available_quantity > 0 && r.unit.toLowerCase() === coverage.find(n => n.need_id === allocNeedId)?.unit.toLowerCase()).map(r => (
                       <option key={r.id} value={r.id}>#{r.id} {r.name} ({r.available_quantity} {r.unit} avail)</option>
@@ -1184,7 +1184,7 @@ function App() {
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <label className="report-meta-label">Quantity to Allocate</label>
-                  <input type="number" className="input-field" placeholder="Quantity" value={allocQuantity} onChange={e => setAllocQuantity(e.target.value === '' ? '' : Number(e.target.value))} required min={1} style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
+                  <input type="number" className="input-field" placeholder="Quantity" value={allocQuantity} onChange={e => setAllocQuantity(e.target.value === '' ? '' : Number(e.target.value))} required min={1} />
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -1213,7 +1213,7 @@ function App() {
                     setDeliveryNeedId(e.target.value === '' ? '' : Number(e.target.value))
                     setDeliveryAllocationId('')
                     setDeliveryQuantity('')
-                  }} required style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }}>
+                  }} required>
                     <option value="">-- Select Need --</option>
                     {coverage.filter(n => n.uncovered_quantity > 0).map(n => (
                       <option key={n.need_id} value={n.need_id}>Need #{n.need_id} ({n.uncovered_quantity} {n.unit} uncovered)</option>
@@ -1223,7 +1223,7 @@ function App() {
                 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <label className="report-meta-label">Select Allocation (Optional)</label>
-                  <select className="input-field" value={deliveryAllocationId} onChange={e => setDeliveryAllocationId(e.target.value === '' ? '' : Number(e.target.value))} disabled={!deliveryNeedId} style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)', opacity: !deliveryNeedId ? 0.5 : 1 }}>
+                  <select className="input-field" value={deliveryAllocationId} onChange={e => setDeliveryAllocationId(e.target.value === '' ? '' : Number(e.target.value))} disabled={!deliveryNeedId}>
                     <option value="">-- No Allocation / Direct Delivery --</option>
                     {deliveryNeedId && allocations.filter(a => a.need_id === deliveryNeedId && a.remaining_quantity > 0).map(a => (
                       <option key={a.id} value={a.id}>Alloc #{a.id} ({a.remaining_quantity} remaining)</option>
@@ -1233,7 +1233,7 @@ function App() {
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <label className="report-meta-label">Delivered Quantity</label>
-                  <input type="number" className="input-field" placeholder="Quantity" value={deliveryQuantity} onChange={e => setDeliveryQuantity(e.target.value === '' ? '' : Number(e.target.value))} required min={1} style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
+                  <input type="number" className="input-field" placeholder="Quantity" value={deliveryQuantity} onChange={e => setDeliveryQuantity(e.target.value === '' ? '' : Number(e.target.value))} required min={1} />
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -1415,7 +1415,7 @@ function App() {
                       onChange={e => setNeedQuantity(e.target.value === '' ? '' : Number(e.target.value))} 
                       max={selectedReport.required_quantity}
                       min={1}
-                      style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }}
+                     
                     />
                   </div>
                   

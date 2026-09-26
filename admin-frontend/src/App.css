@@ -673,3 +673,19 @@
   font-size: 0.9375rem;
   font-weight: 500;
 }
+
+.input-field {
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--panel-border);
+  background: var(--bg-dark);
+  color: var(--text-main);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.input-field:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
