@@ -739,7 +739,7 @@
 }
 
 .input-field {
-  background: #0f172a !important;
+  background: var(--panel-bg-deep) !important;
   border: 1px solid var(--panel-border) !important;
   transition: border-color 0.2s, box-shadow 0.2s !important;
 }
@@ -936,7 +936,7 @@ form {
 .report-body > div[style*="height: 8px"] {
   height: 12px !important;
   border-radius: 6px !important;
-  background-color: #0f172a !important;
+  background-color: var(--panel-bg-deep) !important;
   border: 1px solid rgba(255, 255, 255, 0.05) !important;
   box-shadow: inset 0 2px 4px rgba(0,0,0,0.5) !important;
 }
@@ -960,5 +960,69 @@ div[style*="border: 1px solid #ef4444"] {
   background-color: rgba(56, 189, 248, 0.15) !important;
   color: var(--accent-blue) !important;
   border: 1px solid rgba(56, 189, 248, 0.3) !important;
+}
+
+
+/* --- CHECKPOINT E: FINAL RESPONSIVE & CONSISTENCY QA --- */
+
+.modal-content {
+  max-width: 900px !important;
+  max-height: 85vh !important;
+  overflow: hidden !important;
+}
+
+.modal-body {
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+}
+
+.btn-action, .input-field {
+  min-height: 2.5rem !important;
+}
+
+.btn-action {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.btn-action:disabled {
+  opacity: 0.6 !important;
+  filter: grayscale(0.2) !important;
+}
+
+@media (max-width: 1024px) {
+  .report-meta-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .section-header-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+  .status-card {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .status-card .card-header {
+    margin-bottom: 1rem !important;
+    border-bottom: 1px solid var(--panel-border) !important;
+    padding-bottom: 0.75rem !important;
+  }
+  .status-card .card-body {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 1rem !important;
+  }
+  .status-card .data-grid {
+    flex-direction: column !important;
+    gap: 0.5rem !important;
+  }
+}
+
+.info-label, .summary-label, .report-meta-label, label {
+  color: #cbd5e1 !important;
 }
 
