@@ -78,6 +78,12 @@ function App() {
   const [evidenceData, setEvidenceData] = useState<EvidenceResponse | null>(null)
   const [evidenceError, setEvidenceError] = useState<string>('')
 
+  const [submittingDecisionId, setSubmittingDecisionId] = useState<number | null>(null)
+  const [failedDecisionId, setFailedDecisionId] = useState<number | null>(null)
+  const [decisionError, setDecisionError] = useState<string>('')
+  const [decisionSuccessMessage, setDecisionSuccessMessage] = useState<string>('')
+  const [confirmAction, setConfirmAction] = useState<{ id: number, decision: 'accept' | 'reject' | 'unresolved', label: string } | null>(null)
+
   useEffect(() => {
     let ignore = false
 
@@ -218,6 +224,32 @@ function App() {
     }
   }
 
+  const submitDecision = async (id: number, decision: 'accept' | 'reject' | 'unresolved') => {
+    setSubmittingDecisionId(id)
+    setFailedDecisionId(null)
+    setDecisionError('')
+    setDecisionSuccessMessage('')
+    try {
+      const response = await fetch(`${API_BASE_URL}/relationships/${id}/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision })
+      })
+      if (!response.ok) throw new Error(`Decision API returned ${response.status}`)
+      
+      setDecisionSuccessMessage(`Successfully recorded decision: ${decision}`)
+      setTimeout(() => setDecisionSuccessMessage(''), 4000)
+      
+      handleRefreshData()
+    } catch (err) {
+      setFailedDecisionId(id)
+      setDecisionError(err instanceof Error ? err.message : 'Failed to submit decision')
+    } finally {
+      setSubmittingDecisionId(null)
+      setConfirmAction(null)
+    }
+  }
+
   const handleOpenReport = async (report: Report) => {
     setSelectedReport(report)
     setEvidenceState('loading')
@@ -351,6 +383,12 @@ function App() {
 
         <h2 className="section-title" style={{ marginTop: '2rem' }}>Reconciliation Queue</h2>
         
+        {decisionSuccessMessage && (
+          <div className="success-message">
+            {decisionSuccessMessage}
+          </div>
+        )}
+        
         {queueState === 'loading' && (
           <div className="loading-state">Loading queue items...</div>
         )}
@@ -416,6 +454,58 @@ function App() {
                     </div>
                   </div>
                 </div>
+
+                {decisionError && failedDecisionId === item.relationship_id && (
+                  <div className="error-state" style={{ padding: '0.75rem', marginBottom: 0 }}>
+                    <strong>Error:</strong> {decisionError}
+                  </div>
+                )}
+                
+                {confirmAction?.id === item.relationship_id ? (
+                  <div className="queue-actions" style={{ flexDirection: 'column', gap: '0.5rem' }}>
+                    <p style={{ margin: 0, fontWeight: 600 }}>Are you sure you want to {confirmAction.label}?</p>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button 
+                        className="btn-action confirm" 
+                        onClick={() => submitDecision(item.relationship_id, confirmAction.decision)}
+                        disabled={submittingDecisionId === item.relationship_id}
+                      >
+                        {submittingDecisionId === item.relationship_id ? 'Submitting...' : 'Yes, Confirm'}
+                      </button>
+                      <button 
+                        className="btn-action unresolved" 
+                        onClick={() => setConfirmAction(null)}
+                        disabled={submittingDecisionId === item.relationship_id}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="queue-actions">
+                    <button 
+                      className="btn-action confirm" 
+                      onClick={() => setConfirmAction({ id: item.relationship_id, decision: 'accept', label: item.relationship_type === 'possible_duplicate' ? 'Confirm Duplicate' : 'Confirm Conflict' })}
+                      disabled={submittingDecisionId === item.relationship_id}
+                    >
+                      {item.relationship_type === 'possible_duplicate' ? 'Confirm Duplicate' : 'Confirm Conflict'}
+                    </button>
+                    <button 
+                      className="btn-action reject"
+                      onClick={() => setConfirmAction({ id: item.relationship_id, decision: 'reject', label: 'Reject Relationship' })}
+                      disabled={submittingDecisionId === item.relationship_id}
+                    >
+                      Reject Relationship
+                    </button>
+                    <button 
+                      className="btn-action unresolved"
+                      onClick={() => submitDecision(item.relationship_id, 'unresolved')}
+                      disabled={submittingDecisionId === item.relationship_id}
+                    >
+                      Keep Unresolved
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
