@@ -806,6 +806,76 @@ def create_need(
     }
 
 
+@app.get("/map/needs")
+def map_needs(db: Session = Depends(get_db)):
+    needs = db.query(Need).all()
+    items = []
+    active_count = 0
+    active_people = 0
+
+    for n in needs:
+        r = db.get(Report, n.report_id)
+        if not r:
+            continue
+        if r.latitude is None or r.longitude is None:
+            continue
+
+        delivered = sum(
+            x.delivered_quantity
+            for x in db.query(Delivery)
+            .filter_by(need_id=n.id)
+            .all()
+        )
+
+        allocated = sum(
+            x.allocated_quantity
+            for x in db.query(Allocation)
+            .filter_by(need_id=n.id)
+            .all()
+        )
+
+        uncovered = max(
+            n.verified_quantity - delivered,
+            0.0,
+        )
+
+        coverage_percent = round(
+            (delivered / n.verified_quantity * 100.0)
+            if n.verified_quantity
+            else 0.0,
+            1,
+        )
+
+        if uncovered > 0:
+            active_count += 1
+            active_people += r.people_affected
+
+        items.append(
+            {
+                "need_id": n.id,
+                "report_id": r.id,
+                "latitude": r.latitude,
+                "longitude": r.longitude,
+                "location": r.location,
+                "category": r.category,
+                "people_affected": r.people_affected,
+                "verified_quantity": n.verified_quantity,
+                "unit": n.unit,
+                "allocated_quantity": allocated,
+                "delivered_quantity": delivered,
+                "uncovered_quantity": uncovered,
+                "coverage_percent": coverage_percent,
+            }
+        )
+
+    return {
+        "active_verified_needs_count": active_count,
+        "active_people_affected": active_people,
+        "items": items,
+    }
+
+
+
 # ---------------------------------------------------------------------------
 # RESOURCES
 # ---------------------------------------------------------------------------
