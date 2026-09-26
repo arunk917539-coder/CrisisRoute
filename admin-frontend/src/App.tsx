@@ -941,10 +941,10 @@ function App() {
                   <div className="queue-actions">
                     <button 
                       className="btn-action confirm" 
-                      onClick={() => setConfirmAction({ id: item.relationship_id, decision: 'accept', label: item.relationship_type === 'possible_duplicate' ? 'Confirm Duplicate' : 'Confirm Conflict' })}
+                      onClick={() => setConfirmAction({ id: item.relationship_id, decision: 'accept', label: 'Accept Relationship' })}
                       disabled={submittingDecisionId === item.relationship_id}
                     >
-                      {item.relationship_type === 'possible_duplicate' ? 'Confirm Duplicate' : 'Confirm Conflict'}
+                      Accept Relationship
                     </button>
                     <button 
                       className="btn-action reject"

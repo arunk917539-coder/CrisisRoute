@@ -830,3 +830,81 @@
   border: 1px solid rgba(255, 255, 255, 0.05) !important;
 }
 
+
+/* --- CHECKPOINT C: QUEUE, EVIDENCE, MODALS --- */
+.modal-overlay {
+  background-color: rgba(15, 23, 42, 0.75) !important;
+  backdrop-filter: blur(4px) !important;
+}
+
+.modal-content {
+  max-width: 800px !important;
+  width: 90% !important;
+  max-height: 85vh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  border-radius: 0.75rem !important;
+  border: 1px solid var(--panel-border) !important;
+  box-shadow: var(--shadow-lg) !important;
+  padding: 0 !important;
+}
+
+.modal-header {
+  padding: 1.5rem !important;
+  border-bottom: 1px solid var(--panel-border) !important;
+  background-color: rgba(0, 0, 0, 0.2) !important;
+}
+
+.modal-body {
+  padding: 1.5rem !important;
+  overflow-y: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1.5rem !important;
+}
+
+.modal-close {
+  color: var(--text-muted) !important;
+  font-size: 2rem !important;
+  line-height: 1 !important;
+  transition: color 0.2s !important;
+  cursor: pointer !important;
+}
+
+.modal-close:hover {
+  color: var(--danger-red) !important;
+}
+
+.evidence-section {
+  background: rgba(0, 0, 0, 0.15) !important;
+  border: 1px solid var(--panel-border) !important;
+  border-radius: 0.5rem !important;
+  padding: 1.5rem !important;
+}
+
+.evidence-title {
+  font-size: 1.125rem !important;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1) !important;
+  padding-bottom: 0.75rem !important;
+  margin-bottom: 1rem !important;
+}
+
+.evidence-field-value {
+  font-family: inherit !important;
+  font-weight: 500 !important;
+}
+
+.queue-compare-grid {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 1.5rem !important;
+  margin: 1rem 0 !important;
+}
+
+.queue-report-box {
+  background: rgba(0, 0, 0, 0.2) !important;
+  border: 1px solid var(--panel-border) !important;
+  border-radius: 0.5rem !important;
+  padding: 1.25rem !important;
+}
+
