@@ -10,6 +10,7 @@ export const HomePage: React.FC = () => {
     locationData,
     isCustomLocationSet,
     currentGpsCoordinates,
+    gpsAccuracy,
     setSelectedCoordinates,
   } = useLocationContext();
 
@@ -119,6 +120,9 @@ export const HomePage: React.FC = () => {
                   selectedCoordinates={locationData.coordinates}
                   gpsCoordinates={currentGpsCoordinates}
                   isCustomLocationSet={isCustomLocationSet}
+                  address={locationData.address}
+                  source={locationData.source}
+                  gpsAccuracy={gpsAccuracy}
                   onSelectLocation={(coords) => setSelectedCoordinates(coords, 'map_click')}
                   height="440px"
                   zoomLevel={14}

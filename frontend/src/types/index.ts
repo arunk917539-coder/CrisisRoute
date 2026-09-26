@@ -7,7 +7,7 @@ export interface LocationData {
   coordinates: LocationCoordinates;
   address: string;
   accuracy?: number | null;
-  source: 'gps' | 'map_click' | 'manual' | 'default';
+  source: 'gps' | 'map_click' | 'manual' | 'address_search' | 'default';
   updatedAt: number;
 }
 

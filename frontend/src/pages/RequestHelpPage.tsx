@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useLocationContext, formatCoordinates } from '../context/LocationContext';
+import { MapView } from '../components/MapView';
 import { ReportType, CitizenReportDraft } from '../types';
 import { getCitizenApiStatus } from '../services/api';
 
@@ -8,6 +9,8 @@ export const RequestHelpPage: React.FC = () => {
   const {
     locationData,
     isCustomLocationSet,
+    currentGpsCoordinates,
+    gpsAccuracy,
     setSelectedCoordinates,
   } = useLocationContext();
 
@@ -88,8 +91,8 @@ export const RequestHelpPage: React.FC = () => {
       category: category.trim(),
       description: desc,
       location: loc,
-      latitude: locationData.coordinates.lat,
-      longitude: locationData.coordinates.lng,
+      latitude: isCustomLocationSet ? locationData.coordinates.lat : null,
+      longitude: isCustomLocationSet ? locationData.coordinates.lng : null,
       people_affected: people,
       required_quantity: reportType === 'emergency' ? 0 : qty,
       evidence_status: evidenceStatus,
@@ -290,10 +293,28 @@ export const RequestHelpPage: React.FC = () => {
                   <div className="pin-preview-text">
                     <strong>Pinned Coordinates:</strong>{' '}
                     <code>
-                      {formatCoordinates(locationData.coordinates.lat, locationData.coordinates.lng)}
+                      {isCustomLocationSet
+                        ? formatCoordinates(locationData.coordinates.lat, locationData.coordinates.lng)
+                        : 'No coordinates pinned yet'}
                     </code>
-                    <span className="source-tag">({locationData.source})</span>
+                    {isCustomLocationSet && (
+                      <span className="source-tag">({locationData.source})</span>
+                    )}
                   </div>
+                </div>
+
+                <div className="form-map-preview-container mt-3">
+                  <MapView
+                    selectedCoordinates={locationData.coordinates}
+                    gpsCoordinates={currentGpsCoordinates}
+                    isCustomLocationSet={isCustomLocationSet}
+                    address={locationData.address}
+                    source={locationData.source}
+                    gpsAccuracy={gpsAccuracy}
+                    onSelectLocation={(coords) => setSelectedCoordinates(coords, 'map_click')}
+                    height="260px"
+                    zoomLevel={15}
+                  />
                 </div>
               </div>
 
