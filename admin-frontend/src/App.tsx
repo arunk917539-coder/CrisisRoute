@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import './App.css'
+import { OperationalMap } from './components/OperationalMap'
 
 interface HealthResponse {
   status: string
@@ -92,6 +93,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000
 
 function App() {
   const [connectionState, setConnectionState] = useState<ConnectionState>('loading')
+  const [mapRefreshKey, setMapRefreshKey] = useState<number>(0)
   const [healthData, setHealthData] = useState<HealthResponse | null>(null)
   const [errorMessage, setErrorMessage] = useState<string>('')
 
@@ -396,6 +398,8 @@ function App() {
       setAllocationsState('failed')
       setAllocationsError(err instanceof Error ? err.message : 'Failed to load allocations')
     }
+
+    setMapRefreshKey((prev) => prev + 1)
   }
 
   const submitDecision = async (id: number, decision: 'accept' | 'reject' | 'unresolved') => {
@@ -836,6 +840,8 @@ function App() {
             </div>
           </div>
         )}
+
+        <OperationalMap apiBaseUrl={API_BASE_URL} refreshTrigger={mapRefreshKey} />
 
         <h2 className="section-title" style={{ marginTop: '2rem' }}>Reconciliation Queue</h2>
         
