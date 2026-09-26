@@ -32,6 +32,33 @@ export const RequestHelpPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(null);
 
+  // GPS state
+  const [gpsStatus, setGpsStatus] = useState<'idle' | 'success' | 'denied' | 'error'>('idle');
+  const [capturedLatitude, setCapturedLatitude] = useState<number | null>(null);
+  const [capturedLongitude, setCapturedLongitude] = useState<number | null>(null);
+
+  const handleCaptureLocation = () => {
+    if (!navigator.geolocation) {
+      setGpsStatus('error');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setCapturedLatitude(position.coords.latitude);
+        setCapturedLongitude(position.coords.longitude);
+        setGpsStatus('success');
+      },
+      (error) => {
+        if (error.code === error.PERMISSION_DENIED) {
+          setGpsStatus('denied');
+        } else {
+          setGpsStatus('error');
+        }
+      }
+    );
+  };
+
   // Sync location text if locationData updates from context
   useEffect(() => {
     if (locationData.address) {
@@ -91,8 +118,8 @@ export const RequestHelpPage: React.FC = () => {
       category: category.trim(),
       description: desc,
       location: loc,
-      latitude: isCustomLocationSet ? locationData.coordinates.lat : null,
-      longitude: isCustomLocationSet ? locationData.coordinates.lng : null,
+      latitude: capturedLatitude !== null ? capturedLatitude : (isCustomLocationSet ? locationData.coordinates.lat : null),
+      longitude: capturedLongitude !== null ? capturedLongitude : (isCustomLocationSet ? locationData.coordinates.lng : null),
       people_affected: people,
       required_quantity: reportType === 'emergency' ? 0 : qty,
       evidence_status: evidenceStatus,
@@ -126,6 +153,8 @@ export const RequestHelpPage: React.FC = () => {
       location: draft.location,
       people_affected: draft.people_affected,
       required_quantity: draft.required_quantity,
+      latitude: draft.latitude,
+      longitude: draft.longitude
     };
 
     const result = await createPublicReport(payload);
@@ -343,6 +372,25 @@ export const RequestHelpPage: React.FC = () => {
                         {isCustomLocationSet && (
                           <span className="source-tag">({locationData.source})</span>
                         )}
+                      </div>
+                    </div>
+
+                    <div className="form-group" style={{ marginTop: '1rem', padding: '1rem', backgroundColor: 'var(--slate-50)', borderRadius: '8px', border: '1px solid var(--slate-200)' }}>
+                      <label className="form-label" style={{ marginBottom: '0.5rem', display: 'block', fontWeight: 600 }}>GPS Location (Recommended)</label>
+                      <button
+                        type="button"
+                        onClick={handleCaptureLocation}
+                        className="btn btn-secondary"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}
+                      >
+                        📍 Use My Current Location
+                      </button>
+
+                      <div style={{ fontSize: '0.875rem' }}>
+                        {gpsStatus === 'idle' && <span style={{ color: 'var(--slate-500)' }}>Location not captured</span>}
+                        {gpsStatus === 'success' && <span style={{ color: '#16a34a', fontWeight: 500 }}>Location captured successfully ({capturedLatitude?.toFixed(5)}, {capturedLongitude?.toFixed(5)})</span>}
+                        {gpsStatus === 'denied' && <span style={{ color: '#dc2626' }}>Location permission denied. You can still submit using the text location.</span>}
+                        {gpsStatus === 'error' && <span style={{ color: '#dc2626' }}>Unable to get current location. You can still submit your request.</span>}
                       </div>
                     </div>
 
