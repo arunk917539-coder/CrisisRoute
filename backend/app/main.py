@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -257,6 +257,79 @@ def get_public_request(
         raise HTTPException(404, "Request not found")
 
     return public_request_response(db, report)
+
+
+@app.get("/public/requests")
+def get_public_requests(
+    request_ids: str = Query(
+        ...,
+        description="Comma-separated citizen request IDs such as CR-1,CR-3",
+    ),
+    db: Session = Depends(get_db),
+):
+    """
+    Return citizen-safe projections only for request IDs supplied by the
+    citizen frontend.
+
+    This intentionally does not expose the complete internal report dataset.
+    """
+    raw_ids = [
+        value.strip()
+        for value in request_ids.split(",")
+        if value.strip()
+    ]
+
+    if not raw_ids:
+        raise HTTPException(400, "At least one request ID is required")
+
+    if len(raw_ids) > 50:
+        raise HTTPException(
+            400,
+            "A maximum of 50 request IDs can be requested at once",
+        )
+
+    report_ids = []
+
+    for request_id in raw_ids:
+        report_id = parse_public_request_id(request_id)
+
+        if report_id not in report_ids:
+            report_ids.append(report_id)
+
+    reports_by_id = {}
+
+    for report in (
+        db.query(Report)
+        .filter(Report.id.in_(report_ids))
+        .all()
+    ):
+        reports_by_id[report.id] = report
+
+    missing_ids = [
+        request_id
+        for request_id, report_id in zip(raw_ids, [
+            parse_public_request_id(value)
+            for value in raw_ids
+        ])
+        if report_id not in reports_by_id
+    ]
+
+    if missing_ids:
+        raise HTTPException(
+            404,
+            f"Request not found: {missing_ids[0]}",
+        )
+
+    return {
+        "count": len(report_ids),
+        "items": [
+            public_request_response(
+                db,
+                reports_by_id[report_id],
+            )
+            for report_id in report_ids
+        ],
+    }
 
 
 # ---------------------------------------------------------------------------
