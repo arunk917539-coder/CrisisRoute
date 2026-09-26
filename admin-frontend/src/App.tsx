@@ -52,6 +52,40 @@ interface EvidenceResponse {
   human_review_required: boolean
 }
 
+interface Resource {
+  id: number
+  name: string
+  resource_type: string
+  unit: string
+  location: string
+  available_quantity: number
+  allocated_quantity: number
+  status: string
+  source: string
+  is_synthetic: boolean
+}
+
+interface NeedCoverage {
+  need_id: number
+  report_id: number
+  verified_quantity: number
+  unit: string
+  allocated_quantity: number
+  remaining_to_allocate: number
+  delivered_quantity: number
+  uncovered_quantity: number
+  coverage_percent: number
+}
+
+interface AllocationRecord {
+  id: number
+  need_id: number
+  resource_id: number
+  allocated_quantity: number
+  delivered_quantity: number
+  remaining_quantity: number
+}
+
 type ConnectionState = 'loading' | 'connected' | 'failed'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
@@ -92,6 +126,37 @@ function App() {
   const [creatingNeed, setCreatingNeed] = useState<boolean>(false)
   const [needError, setNeedError] = useState<string>('')
   const [needSuccess, setNeedSuccess] = useState<string>('')
+
+  const [resourcesState, setResourcesState] = useState<ConnectionState>('loading')
+  const [resources, setResources] = useState<Resource[]>([])
+  const [resourcesError, setResourcesError] = useState<string>('')
+
+  const [coverageState, setCoverageState] = useState<ConnectionState>('loading')
+  const [coverage, setCoverage] = useState<NeedCoverage[]>([])
+  const [coverageError, setCoverageError] = useState<string>('')
+
+  const [allocationsState, setAllocationsState] = useState<ConnectionState>('loading')
+  const [allocations, setAllocations] = useState<AllocationRecord[]>([])
+  const [allocationsError, setAllocationsError] = useState<string>('')
+
+  const [newResource, setNewResource] = useState({
+    name: '',
+    resource_type: '',
+    unit: 'units',
+    location: '',
+    available_quantity: '' as number | '',
+    source: ''
+  })
+  const [addingResource, setAddingResource] = useState(false)
+  const [addResourceError, setAddResourceError] = useState('')
+  const [addResourceSuccess, setAddResourceSuccess] = useState('')
+
+  const [allocNeedId, setAllocNeedId] = useState<number | ''>('')
+  const [allocResourceId, setAllocResourceId] = useState<number | ''>('')
+  const [allocQuantity, setAllocQuantity] = useState<number | ''>('')
+  const [allocatingState, setAllocatingState] = useState(false)
+  const [allocError, setAllocError] = useState('')
+  const [allocSuccess, setAllocSuccess] = useState('')
 
   useEffect(() => {
     let ignore = false
@@ -165,10 +230,64 @@ function App() {
       }
     }
 
+    async function fetchResources() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/resources`)
+        if (!response.ok) throw new Error(`Resources API returned ${response.status}`)
+        const data: Resource[] = await response.json()
+        if (!ignore) {
+          setResources(data)
+          setResourcesState('connected')
+        }
+      } catch (err) {
+        if (!ignore) {
+          setResourcesState('failed')
+          setResourcesError(err instanceof Error ? err.message : 'Failed to load resources')
+        }
+      }
+    }
+
+    async function fetchCoverage() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/coverage`)
+        if (!response.ok) throw new Error(`Coverage API returned ${response.status}`)
+        const data = await response.json()
+        if (!ignore) {
+          setCoverage(data.needs)
+          setCoverageState('connected')
+        }
+      } catch (err) {
+        if (!ignore) {
+          setCoverageState('failed')
+          setCoverageError(err instanceof Error ? err.message : 'Failed to load coverage')
+        }
+      }
+    }
+
+    async function fetchAllocations() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/allocations`)
+        if (!response.ok) throw new Error(`Allocations API returned ${response.status}`)
+        const data: AllocationRecord[] = await response.json()
+        if (!ignore) {
+          setAllocations(data)
+          setAllocationsState('connected')
+        }
+      } catch (err) {
+        if (!ignore) {
+          setAllocationsState('failed')
+          setAllocationsError(err instanceof Error ? err.message : 'Failed to load allocations')
+        }
+      }
+    }
+
     fetchHealth()
     fetchDashboard()
     fetchReports()
     fetchQueue()
+    fetchResources()
+    fetchCoverage()
+    fetchAllocations()
 
     return () => {
       ignore = true
@@ -230,6 +349,45 @@ function App() {
     } catch (err) {
       setQueueState('failed')
       setQueueError(err instanceof Error ? err.message : 'Failed to load queue')
+    }
+
+    setResourcesState('loading')
+    setResourcesError('')
+    try {
+      const response = await fetch(`${API_BASE_URL}/resources`)
+      if (!response.ok) throw new Error(`Resources API returned ${response.status}`)
+      const data: Resource[] = await response.json()
+      setResources(data)
+      setResourcesState('connected')
+    } catch (err) {
+      setResourcesState('failed')
+      setResourcesError(err instanceof Error ? err.message : 'Failed to load resources')
+    }
+
+    setCoverageState('loading')
+    setCoverageError('')
+    try {
+      const response = await fetch(`${API_BASE_URL}/coverage`)
+      if (!response.ok) throw new Error(`Coverage API returned ${response.status}`)
+      const data = await response.json()
+      setCoverage(data.needs)
+      setCoverageState('connected')
+    } catch (err) {
+      setCoverageState('failed')
+      setCoverageError(err instanceof Error ? err.message : 'Failed to load coverage')
+    }
+
+    setAllocationsState('loading')
+    setAllocationsError('')
+    try {
+      const response = await fetch(`${API_BASE_URL}/allocations`)
+      if (!response.ok) throw new Error(`Allocations API returned ${response.status}`)
+      const data: AllocationRecord[] = await response.json()
+      setAllocations(data)
+      setAllocationsState('connected')
+    } catch (err) {
+      setAllocationsState('failed')
+      setAllocationsError(err instanceof Error ? err.message : 'Failed to load allocations')
     }
   }
 
@@ -331,6 +489,119 @@ function App() {
       setNeedError(err instanceof Error ? err.message : 'Failed to create verified need')
     } finally {
       setCreatingNeed(false)
+    }
+  }
+
+  const submitResource = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (newResource.available_quantity === '' || newResource.available_quantity <= 0) {
+      setAddResourceError('Available quantity must be greater than 0')
+      return
+    }
+    
+    setAddingResource(true)
+    setAddResourceError('')
+    setAddResourceSuccess('')
+    try {
+      const response = await fetch(`${API_BASE_URL}/resources`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newResource.name,
+          resource_type: newResource.resource_type,
+          unit: newResource.unit,
+          location: newResource.location,
+          available_quantity: Number(newResource.available_quantity),
+          source: newResource.source,
+          status: 'active'
+        })
+      })
+      if (!response.ok) {
+        const errData = await response.json().catch(() => null)
+        throw new Error(errData?.detail || `API returned ${response.status}`)
+      }
+      
+      setAddResourceSuccess('Resource added successfully')
+      setTimeout(() => setAddResourceSuccess(''), 4000)
+      
+      setNewResource({
+        name: '',
+        resource_type: '',
+        unit: 'units',
+        location: '',
+        available_quantity: '',
+        source: ''
+      })
+      
+      handleRefreshData()
+    } catch (err) {
+      setAddResourceError(err instanceof Error ? err.message : 'Failed to add resource')
+    } finally {
+      setAddingResource(false)
+    }
+  }
+
+  const submitAllocation = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (allocNeedId === '' || allocResourceId === '' || allocQuantity === '' || allocQuantity <= 0) {
+      setAllocError('Please fill out all fields correctly. Quantity must be > 0.')
+      return
+    }
+
+    const need = coverage.find(n => n.need_id === allocNeedId)
+    const resource = resources.find(r => r.id === allocResourceId)
+
+    if (!need) {
+      setAllocError('Selected need does not exist.')
+      return
+    }
+    if (!resource) {
+      setAllocError('Selected resource does not exist.')
+      return
+    }
+    if (need.unit.toLowerCase() !== resource.unit.toLowerCase()) {
+      setAllocError(`Unit mismatch: need uses ${need.unit}, resource uses ${resource.unit}.`)
+      return
+    }
+    if (allocQuantity > resource.available_quantity) {
+      setAllocError('Allocation exceeds remaining resource availability.')
+      return
+    }
+    if (allocQuantity > need.remaining_to_allocate) {
+      setAllocError("Allocation exceeds the need's remaining uncovered quantity.")
+      return
+    }
+    
+    setAllocatingState(true)
+    setAllocError('')
+    setAllocSuccess('')
+    try {
+      const response = await fetch(`${API_BASE_URL}/allocations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          need_id: Number(allocNeedId),
+          resource_id: Number(allocResourceId),
+          allocated_quantity: Number(allocQuantity)
+        })
+      })
+      if (!response.ok) {
+        const errData = await response.json().catch(() => null)
+        throw new Error(errData?.detail || `API returned ${response.status}`)
+      }
+      
+      setAllocSuccess('Resource allocated successfully')
+      setTimeout(() => setAllocSuccess(''), 4000)
+      
+      setAllocNeedId('')
+      setAllocResourceId('')
+      setAllocQuantity('')
+      
+      handleRefreshData()
+    } catch (err) {
+      setAllocError(err instanceof Error ? err.message : 'Failed to allocate resource')
+    } finally {
+      setAllocatingState(false)
     }
   }
 
@@ -667,6 +938,174 @@ function App() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Logistics & Allocation Section */}
+        <div className="section-header" style={{ marginTop: '3rem' }}>
+          <h2>Resource Inventory</h2>
+        </div>
+        
+        {resourcesState === 'loading' && <div className="loading-state">Loading resources...</div>}
+        {resourcesState === 'failed' && <div className="error-state"><strong>Error:</strong> {resourcesError}</div>}
+        {resourcesState === 'connected' && (
+          <div className="reports-grid">
+            <div className="report-card" style={{ border: '1px solid var(--panel-border)' }}>
+              <div className="report-header">
+                <div className="report-title">
+                  <span>Add New Resource</span>
+                </div>
+              </div>
+              <div className="report-body">
+                <form onSubmit={submitResource} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <input type="text" placeholder="Resource Name (e.g. Water Bottles)" value={newResource.name} onChange={e => setNewResource({...newResource, name: e.target.value})} required minLength={2} className="input-field" style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
+                  <input type="text" placeholder="Resource Type (e.g. supplies)" value={newResource.resource_type} onChange={e => setNewResource({...newResource, resource_type: e.target.value})} required minLength={2} className="input-field" style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
+                  <input type="text" placeholder="Unit (e.g. liters)" value={newResource.unit} onChange={e => setNewResource({...newResource, unit: e.target.value})} required minLength={1} className="input-field" style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
+                  <input type="text" placeholder="Location" value={newResource.location} onChange={e => setNewResource({...newResource, location: e.target.value})} required minLength={2} className="input-field" style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
+                  <input type="number" placeholder="Available Quantity" value={newResource.available_quantity} onChange={e => setNewResource({...newResource, available_quantity: e.target.value === '' ? '' : Number(e.target.value)})} required min={1} className="input-field" style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
+                  <input type="text" placeholder="Source (e.g. Warehouse A)" value={newResource.source} onChange={e => setNewResource({...newResource, source: e.target.value})} required minLength={2} className="input-field" style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
+                  {addResourceError && <div className="error-state" style={{ padding: '0.5rem', margin: 0 }}>{addResourceError}</div>}
+                  {addResourceSuccess && <div className="success-message" style={{ padding: '0.5rem', margin: 0 }}>{addResourceSuccess}</div>}
+                  <button type="submit" className="btn-action confirm" disabled={addingResource}>
+                    {addingResource ? 'Adding...' : 'Add Resource'}
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            {resources.map(resource => (
+              <div key={resource.id} className="report-card">
+                <div className="report-header">
+                  <div className="report-title">
+                    <span className="report-id">#{resource.id}</span>
+                    <span>{resource.name}</span>
+                    <span className={`report-type-badge`} style={{ backgroundColor: '#2563eb' }}>{resource.resource_type}</span>
+                  </div>
+                </div>
+                <div className="report-body">
+                  <div className="report-meta-grid">
+                    <div className="report-meta-item"><span className="report-meta-label">Location</span><span className="report-meta-value">{resource.location}</span></div>
+                    <div className="report-meta-item"><span className="report-meta-label">Source</span><span className="report-meta-value">{resource.source}</span></div>
+                    <div className="report-meta-item"><span className="report-meta-label">Available Qty</span><span className="report-meta-value">{resource.available_quantity} {resource.unit}</span></div>
+                    <div className="report-meta-item"><span className="report-meta-label">Allocated Qty</span><span className="report-meta-value">{resource.allocated_quantity} {resource.unit}</span></div>
+                    <div className="report-meta-item"><span className="report-meta-label">Status</span><span className="report-meta-value">{resource.status}</span></div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="section-header" style={{ marginTop: '3rem' }}>
+          <h2>Verified Needs & Coverage</h2>
+        </div>
+        
+        {coverageState === 'loading' && <div className="loading-state">Loading coverage...</div>}
+        {coverageState === 'failed' && <div className="error-state"><strong>Error:</strong> {coverageError}</div>}
+        {coverageState === 'connected' && (
+          <div className="reports-grid">
+            {coverage.map(need => (
+              <div key={need.need_id} className="report-card">
+                <div className="report-header">
+                  <div className="report-title">
+                    <span className="report-id">Need #{need.need_id}</span>
+                    <span>Report #{need.report_id}</span>
+                  </div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: need.coverage_percent >= 100 ? '#10b981' : '#f59e0b' }}>
+                    {need.coverage_percent}% Covered
+                  </div>
+                </div>
+                <div className="report-body">
+                  <div className="report-meta-grid">
+                    <div className="report-meta-item"><span className="report-meta-label">Verified Qty</span><span className="report-meta-value">{need.verified_quantity} {need.unit}</span></div>
+                    <div className="report-meta-item"><span className="report-meta-label">Allocated Qty</span><span className="report-meta-value">{need.allocated_quantity} {need.unit}</span></div>
+                    <div className="report-meta-item"><span className="report-meta-label">Delivered Qty</span><span className="report-meta-value">{need.delivered_quantity} {need.unit}</span></div>
+                    <div className="report-meta-item"><span className="report-meta-label">Remaining to Allocate</span><span className="report-meta-value">{need.remaining_to_allocate} {need.unit}</span></div>
+                    <div className="report-meta-item"><span className="report-meta-label">Uncovered Qty</span><span className="report-meta-value">{need.uncovered_quantity} {need.unit}</span></div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="section-header" style={{ marginTop: '3rem' }}>
+          <h2>Allocate Resource</h2>
+        </div>
+        <div className="reports-grid">
+          <div className="report-card" style={{ gridColumn: '1 / -1', border: '1px solid #10b981' }}>
+            <div className="report-body">
+              <form onSubmit={submitAllocation} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', alignItems: 'end' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <label className="report-meta-label">Select Verified Need</label>
+                  <select className="input-field" value={allocNeedId} onChange={e => {
+                    setAllocNeedId(e.target.value === '' ? '' : Number(e.target.value))
+                    setAllocResourceId('')
+                    setAllocQuantity('')
+                  }} required style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }}>
+                    <option value="">-- Select Need --</option>
+                    {coverage.filter(n => n.remaining_to_allocate > 0).map(n => (
+                      <option key={n.need_id} value={n.need_id}>Need #{n.need_id} (Needs {n.remaining_to_allocate} {n.unit})</option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <label className="report-meta-label">Select Resource</label>
+                  <select className="input-field" value={allocResourceId} onChange={e => setAllocResourceId(e.target.value === '' ? '' : Number(e.target.value))} required disabled={!allocNeedId} style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)', opacity: !allocNeedId ? 0.5 : 1 }}>
+                    <option value="">-- Select Resource --</option>
+                    {allocNeedId && resources.filter(r => r.status === 'active' && r.available_quantity > 0 && r.unit.toLowerCase() === coverage.find(n => n.need_id === allocNeedId)?.unit.toLowerCase()).map(r => (
+                      <option key={r.id} value={r.id}>#{r.id} {r.name} ({r.available_quantity} {r.unit} avail)</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <label className="report-meta-label">Quantity to Allocate</label>
+                  <input type="number" className="input-field" placeholder="Quantity" value={allocQuantity} onChange={e => setAllocQuantity(e.target.value === '' ? '' : Number(e.target.value))} required min={1} style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <button type="submit" className="btn-action confirm" style={{ backgroundColor: '#10b981' }} disabled={allocatingState}>
+                    {allocatingState ? 'Allocating...' : 'Allocate'}
+                  </button>
+                </div>
+              </form>
+              
+              {allocError && <div className="error-state" style={{ marginTop: '1rem', marginBottom: 0 }}>{allocError}</div>}
+              {allocSuccess && <div className="success-message" style={{ marginTop: '1rem', marginBottom: 0 }}>{allocSuccess}</div>}
+            </div>
+          </div>
+        </div>
+
+        <div className="section-header" style={{ marginTop: '3rem' }}>
+          <h2>Recent Allocations</h2>
+        </div>
+        {allocationsState === 'loading' && <div className="loading-state">Loading allocations...</div>}
+        {allocationsState === 'failed' && <div className="error-state"><strong>Error:</strong> {allocationsError}</div>}
+        {allocationsState === 'connected' && (
+          <div className="reports-grid">
+            {allocations.length === 0 ? (
+              <div style={{ color: 'var(--text-muted)' }}>No allocations found.</div>
+            ) : (
+              allocations.map(alloc => (
+                <div key={alloc.id} className="report-card">
+                  <div className="report-header">
+                    <div className="report-title">
+                      <span className="report-id">Alloc #{alloc.id}</span>
+                      <span>Need #{alloc.need_id} &rarr; Res #{alloc.resource_id}</span>
+                    </div>
+                  </div>
+                  <div className="report-body">
+                    <div className="report-meta-grid">
+                      <div className="report-meta-item"><span className="report-meta-label">Allocated Qty</span><span className="report-meta-value">{alloc.allocated_quantity}</span></div>
+                      <div className="report-meta-item"><span className="report-meta-label">Delivered Qty</span><span className="report-meta-value">{alloc.delivered_quantity}</span></div>
+                      <div className="report-meta-item"><span className="report-meta-label">Remaining Qty</span><span className="report-meta-value">{alloc.remaining_quantity}</span></div>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         )}
       </main>
