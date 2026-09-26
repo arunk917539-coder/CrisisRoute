@@ -992,7 +992,7 @@ function App() {
 
         {reportsState === 'connected' && reports.length > 0 && (
           <div className="reports-list">
-            {reports.map((report) => (
+            {[...reports].sort((a, b) => b.id - a.id).map((report) => (
               <div key={report.id} className="report-card">
                 <div className="report-header">
                   <div className="report-title">
