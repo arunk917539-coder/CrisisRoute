@@ -94,6 +94,13 @@ export const RequestHelpPage: React.FC = () => {
       setValidationError('Please specify a location (at least 2 characters) or select one on the map.');
       return null;
     }
+
+    if (!isCustomLocationSet) {
+      setValidationError(
+        'Please pin your exact location using GPS, the map, address search, or manual coordinates before submitting.'
+      );
+      return null;
+    }
     if (desc.length < 5) {
       setValidationError('Please provide a description of the situation (at least 5 characters).');
       return null;
@@ -151,6 +158,8 @@ export const RequestHelpPage: React.FC = () => {
       category: draft.category,
       description: draft.description,
       location: draft.location,
+      latitude: draft.latitude,
+      longitude: draft.longitude,
       people_affected: draft.people_affected,
       required_quantity: draft.required_quantity,
       latitude: draft.latitude,
@@ -358,6 +367,9 @@ export const RequestHelpPage: React.FC = () => {
                         className="form-input"
                         placeholder="Enter street, landmark, building, or village name"
                       />
+                      <small className="form-helper">
+                        A map/GPS pin is required. Typing an address alone does not set your incident coordinates.
+                      </small>
                     </div>
 
                     <div className="location-pin-preview">

@@ -47,6 +47,8 @@ export interface PublicReportPayload {
   category: string;
   description: string;
   location: string;
+  latitude: number | null;
+  longitude: number | null;
   people_affected: number;
   required_quantity: number;
   latitude?: number | null;
