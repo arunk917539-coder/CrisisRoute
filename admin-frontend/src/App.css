@@ -689,3 +689,71 @@
   cursor: not-allowed;
 }
 
+
+/* --- CHECKPOINT A: COMMAND CENTER POLISH OVERRIDES --- */
+.status-card, .summary-card, .report-card, .queue-card, .modal-content {
+  box-shadow: var(--shadow-md) !important;
+  border: 1px solid var(--panel-border) !important;
+  background-color: var(--panel-bg) !important;
+  border-radius: 0.5rem !important;
+}
+
+.btn-action {
+  box-shadow: var(--shadow-sm) !important;
+  border-radius: 0.375rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.025em !important;
+}
+
+.btn-action.confirm { background-color: var(--success-green) !important; }
+.btn-action.confirm:hover:not(:disabled) { background-color: #059669 !important; }
+
+.btn-action.reject { background-color: var(--danger-red) !important; }
+.btn-action.reject:hover:not(:disabled) { background-color: #dc2626 !important; }
+
+.btn-action.unresolved { background-color: var(--neutral-gray) !important; }
+.btn-action.unresolved:hover:not(:disabled) { background-color: #475569 !important; }
+
+.success-message {
+  background-color: rgba(16, 185, 129, 0.1) !important;
+  border: 1px solid rgba(16, 185, 129, 0.3) !important;
+  color: #34d399 !important;
+}
+
+.error-box, .error-state {
+  background-color: rgba(239, 68, 68, 0.1) !important;
+  border: 1px solid rgba(239, 68, 68, 0.3) !important;
+  color: #fca5a5 !important;
+}
+
+.queue-type-badge.possible_duplicate {
+  background: rgba(245, 158, 11, 0.15) !important;
+  color: var(--warning-amber) !important;
+  border: 1px solid rgba(245, 158, 11, 0.3) !important;
+}
+
+.queue-type-badge.possible_conflict {
+  background: rgba(239, 68, 68, 0.15) !important;
+  color: var(--danger-red) !important;
+  border: 1px solid rgba(239, 68, 68, 0.3) !important;
+}
+
+.input-field {
+  background: #0f172a !important;
+  border: 1px solid var(--panel-border) !important;
+  transition: border-color 0.2s, box-shadow 0.2s !important;
+}
+
+.input-field:focus {
+  outline: none !important;
+  border-color: var(--accent-blue) !important;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2) !important;
+}
+
+.status-badge.loading { color: var(--warning-amber) !important; border-color: rgba(245, 158, 11, 0.3) !important; }
+.status-badge.connected { color: var(--success-green) !important; border-color: rgba(16, 185, 129, 0.3) !important; }
+.status-badge.failed { color: var(--danger-red) !important; border-color: rgba(239, 68, 68, 0.3) !important; }
+.status-badge.loading .status-dot { background-color: var(--warning-amber) !important; }
+.status-badge.connected .status-dot { background-color: var(--success-green) !important; }
+.status-badge.failed .status-dot { background-color: var(--danger-red) !important; }
+
