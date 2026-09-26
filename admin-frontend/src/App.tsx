@@ -133,7 +133,6 @@ function App() {
 
   const [coverageState, setCoverageState] = useState<ConnectionState>('loading')
   const [coverage, setCoverage] = useState<NeedCoverage[]>([])
-  const [coverageSummary, setCoverageSummary] = useState({ total_verified: 0, total_delivered: 0, total_uncovered: 0 })
   const [coverageError, setCoverageError] = useState<string>('')
 
   const [allocationsState, setAllocationsState] = useState<ConnectionState>('loading')
@@ -262,7 +261,6 @@ function App() {
         const data = await response.json()
         if (!ignore) {
           setCoverage(data.needs)
-          setCoverageSummary({ total_verified: data.total_verified, total_delivered: data.total_delivered, total_uncovered: data.total_uncovered })
           setCoverageState('connected')
         }
       } catch (err) {
@@ -380,7 +378,6 @@ function App() {
       if (!response.ok) throw new Error(`Coverage API returned ${response.status}`)
       const data = await response.json()
       setCoverage(data.needs)
-      setCoverageSummary({ total_verified: data.total_verified, total_delivered: data.total_delivered, total_uncovered: data.total_uncovered })
       setCoverageState('connected')
     } catch (err) {
       setCoverageState('failed')
@@ -718,6 +715,18 @@ function App() {
     setNeedError('')
     setNeedSuccess('')
   }
+
+  const coverageByUnit = coverage.reduce((acc, need) => {
+    const unit = need.unit.toLowerCase()
+    if (!acc[unit]) {
+      acc[unit] = { verified: 0, delivered: 0, uncovered: 0 }
+    }
+    acc[unit].verified += need.verified_quantity
+    acc[unit].delivered += need.delivered_quantity
+    acc[unit].uncovered += need.uncovered_quantity
+    return acc
+  }, {} as Record<string, { verified: number; delivered: number; uncovered: number }>)
+  const units = Object.keys(coverageByUnit)
 
   return (
     <div className="app-container">
@@ -1094,21 +1103,47 @@ function App() {
                   </div>
                 </div>
                 <div className="report-body">
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', textAlign: 'center' }}>
-                    <div style={{ padding: '1rem', background: 'var(--panel-bg)', borderRadius: '0.25rem', border: '1px solid var(--panel-border)' }}>
-                      <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Total Verified Requirement</div>
-                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--text-main)' }}>{coverageSummary.total_verified}</div>
+                  {units.length === 0 ? (
+                    <div style={{ color: 'var(--text-muted)' }}>No verified needs found.</div>
+                  ) : units.length === 1 ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', textAlign: 'center' }}>
+                      <div style={{ padding: '1rem', background: 'var(--panel-bg)', borderRadius: '0.25rem', border: '1px solid var(--panel-border)' }}>
+                        <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Total Verified Requirement</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--text-main)' }}>{coverageByUnit[units[0]].verified} <span style={{fontSize: '1rem', fontWeight: 'normal', color: 'var(--text-muted)'}}>{units[0]}</span></div>
+                      </div>
+                      <div style={{ padding: '1rem', background: 'var(--panel-bg)', borderRadius: '0.25rem', border: '1px solid #3b82f6' }}>
+                        <div style={{ fontSize: '0.875rem', color: '#3b82f6', marginBottom: '0.5rem' }}>Total Delivered</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#3b82f6' }}>{coverageByUnit[units[0]].delivered} <span style={{fontSize: '1rem', fontWeight: 'normal', opacity: 0.8}}>{units[0]}</span></div>
+                      </div>
+                      <div style={{ padding: '1rem', background: 'var(--panel-bg)', borderRadius: '0.25rem', border: '1px solid #ef4444' }}>
+                        <div style={{ fontSize: '0.875rem', color: '#ef4444', marginBottom: '0.5rem' }}>Total Uncovered</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#ef4444' }}>{coverageByUnit[units[0]].uncovered} <span style={{fontSize: '1rem', fontWeight: 'normal', opacity: 0.8}}>{units[0]}</span></div>
+                      </div>
                     </div>
-                    <div style={{ padding: '1rem', background: 'var(--panel-bg)', borderRadius: '0.25rem', border: '1px solid #3b82f6' }}>
-                      <div style={{ fontSize: '0.875rem', color: '#3b82f6', marginBottom: '0.5rem' }}>Total Delivered</div>
-                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#3b82f6' }}>{coverageSummary.total_delivered}</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      {units.map(unit => (
+                        <div key={unit} style={{ padding: '1rem', background: 'var(--panel-bg)', borderRadius: '0.25rem', border: '1px solid var(--panel-border)' }}>
+                          <div style={{ fontSize: '1rem', fontWeight: 'bold', color: 'var(--text-main)', marginBottom: '0.5rem', textTransform: 'capitalize' }}>{unit}</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', textAlign: 'center' }}>
+                            <div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Verified</div>
+                              <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--text-main)' }}>{coverageByUnit[unit].verified}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '0.75rem', color: '#3b82f6', marginBottom: '0.25rem' }}>Delivered</div>
+                              <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#3b82f6' }}>{coverageByUnit[unit].delivered}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '0.75rem', color: '#ef4444', marginBottom: '0.25rem' }}>Uncovered</div>
+                              <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#ef4444' }}>{coverageByUnit[unit].uncovered}</div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <div style={{ padding: '1rem', background: 'var(--panel-bg)', borderRadius: '0.25rem', border: '1px solid #ef4444' }}>
-                      <div style={{ fontSize: '0.875rem', color: '#ef4444', marginBottom: '0.5rem' }}>Total Uncovered</div>
-                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#ef4444' }}>{coverageSummary.total_uncovered}</div>
-                    </div>
-                  </div>
-                  {coverageSummary.total_uncovered === 0 && coverageSummary.total_verified > 0 && (
+                  )}
+                  {units.every(u => coverageByUnit[u].uncovered === 0) && units.length > 0 && (
                     <div className="success-message" style={{ marginTop: '1rem', textAlign: 'center' }}>
                       All verified needs are fully covered.
                     </div>
