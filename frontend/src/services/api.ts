@@ -1,4 +1,4 @@
-import { CitizenReportDraft, ApiSubmissionStatus } from '../types';
+import { CitizenReportDraft, ApiSubmissionStatus, PublicReportPayload, SubmitReportOutcome, PublicRequestResponse } from '../types';
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -29,36 +29,61 @@ export async function checkBackendHealth(): Promise<{ isOnline: boolean; demoDat
 }
 
 /**
- * Citizen Report Submission Handler.
- *
- * Current backend status:
- * The backend currently provides responder-internal endpoints (`POST /reports` for synthetic intake),
- * but does not yet provide an authenticated or rate-limited public citizen intake contract.
- *
- * To honor strict safety rules:
- * - We do NOT send unvetted citizen reports to admin-only /reports endpoints.
- * - We do NOT fake a successful submission.
- * - We clearly inform the citizen that the submission endpoint will be wired in Batch 2.
+ * Submit a public citizen request to POST /public/reports.
  */
-export async function submitCitizenReport(
-  _report: CitizenReportDraft
-): Promise<{ success: boolean; message: string; trackingCode?: string }> {
-  // Staging integration point for citizen submission.
-  // In Batch 2, when the public citizen endpoint is exposed (e.g. POST /api/citizen/reports),
-  // this function will execute the verified fetch call.
-  return {
-    success: false,
-    message:
-      'Citizen public submission pipeline is currently in staging. Your report draft has been prepared locally but was not dispatched to avoid submitting to internal responder queues.',
-  };
+export async function createPublicReport(
+  payload: PublicReportPayload
+): Promise<SubmitReportOutcome> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/public/reports`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `Submission failed (${response.status})`;
+      try {
+        const errorData = await response.json();
+        if (errorData && errorData.detail) {
+          errorMessage = typeof errorData.detail === 'string' ? errorData.detail : JSON.stringify(errorData.detail);
+        }
+      } catch (e) {
+        // ignore JSON parse error
+      }
+      return { success: false, errorMessage };
+    }
+
+    const data: PublicRequestResponse = await response.json();
+    return { success: true, request: data };
+  } catch (err) {
+    return {
+      success: false,
+      errorMessage: err instanceof Error ? err.message : 'Network error occurred while submitting.',
+    };
+  }
 }
 
 /**
- * Status indicator for citizen services.
+ * Retrieve a public citizen request from GET /public/requests/{request_id}.
  */
-export function getCitizenApiStatus(): ApiSubmissionStatus {
-  return {
-    isAvailable: false,
-    message: 'Citizen intake API is in staging (Batch 2). Draft preview is enabled.',
-  };
+export async function getPublicRequest(requestId: string): Promise<{ success: boolean; request?: PublicRequestResponse; errorMessage?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/public/requests/${encodeURIComponent(requestId)}`);
+
+    if (!response.ok) {
+      let errorMessage = `Retrieval failed (${response.status})`;
+      if (response.status === 404) {
+        errorMessage = 'Request ID not found. Please check and try again.';
+      }
+      return { success: false, errorMessage };
+    }
+
+    const data: PublicRequestResponse = await response.json();
+    return { success: true, request: data };
+  } catch (err) {
+    return { success: false, errorMessage: 'Network error occurred while retrieving request.' };
+  }
 }

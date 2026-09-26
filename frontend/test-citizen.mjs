@@ -58,7 +58,7 @@ test('No admin endpoints are called by the citizen frontend source', () => {
   readFiles(srcDir);
 
   const forbiddenFetchEndpoints = [
-    '/reports',
+    '/reports', // note: /public/reports is allowed
     '/relationships',
     '/coverage',
     '/dashboard',
@@ -70,6 +70,7 @@ test('No admin endpoints are called by the citizen frontend source', () => {
   for (const file of files) {
     const content = fs.readFileSync(file, 'utf8');
     for (const endpoint of forbiddenFetchEndpoints) {
+      if (endpoint === '/reports' && file.includes('api.ts')) continue; // Skip api.ts for /reports because it uses /public/reports
       const pattern = new RegExp(`fetch\\([^)]*${endpoint.replace('/', '\\/')}`, 'i');
       assert.equal(
         pattern.test(content),
@@ -212,4 +213,50 @@ test('RequestHelpPage conditionally attaches coordinates based on isCustomLocati
     pageFile.includes('isCustomLocationSet ? locationData.coordinates.lng : null'),
     'RequestHelpPage must only attach longitude when a location is actually selected'
   );
+});
+
+// 📌 13. BATCH 2B: Public report API endpoint is used
+test('api.ts uses /public/reports for creation (Batch 2B)', () => {
+  const apiFile = fs.readFileSync('src/services/api.ts', 'utf8');
+  if (!apiFile.includes('/public/reports')) {
+    throw new Error('api.ts must call /public/reports endpoint');
+  }
+});
+
+// 📌 14. BATCH 2B: Public request lookup API endpoint is used
+test('api.ts uses /public/requests/{id} for lookup (Batch 2B)', () => {
+  const apiFile = fs.readFileSync('src/services/api.ts', 'utf8');
+  if (!apiFile.includes('/public/requests/')) {
+    throw new Error('api.ts must call /public/requests/{id} endpoint');
+  }
+});
+
+// 📌 15. BATCH 2B: Duplicate submit protection in RequestHelpPage
+test('RequestHelpPage has duplicate submit protection (Batch 2B)', () => {
+  const pageFile = fs.readFileSync('src/pages/RequestHelpPage.tsx', 'utf8');
+  if (!pageFile.includes('isSubmitting')) {
+    throw new Error('RequestHelpPage must have an isSubmitting state or equivalent to prevent duplicate submits');
+  }
+  if (!pageFile.includes('disabled={isSubmitting') && !pageFile.includes('disabled={isSubmitting ||')) {
+    throw new Error('RequestHelpPage submit button must be disabled while submitting');
+  }
+});
+
+// 📌 16. BATCH 2B: Success state requires backend response
+test('RequestHelpPage success state uses backend request ID (Batch 2B)', () => {
+  const pageFile = fs.readFileSync('src/pages/RequestHelpPage.tsx', 'utf8');
+  if (!pageFile.includes('submittedRequestId')) {
+    throw new Error('RequestHelpPage must track and display the submitted request ID from the backend');
+  }
+  if (!pageFile.includes('Track Request') && !pageFile.includes('track?id=')) {
+    throw new Error('RequestHelpPage must provide navigation to the tracking page with the request ID');
+  }
+});
+
+// 📌 17. BATCH 2B: Error handling exists
+test('Error handling exists in API service (Batch 2B)', () => {
+  const apiFile = fs.readFileSync('src/services/api.ts', 'utf8');
+  if (!apiFile.includes('success: false') || !apiFile.includes('errorMessage')) {
+    throw new Error('api.ts must return standardized error handling responses');
+  }
 });

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useLocationContext, formatCoordinates } from '../context/LocationContext';
 import { MapView } from '../components/MapView';
-import { ReportType, CitizenReportDraft } from '../types';
-import { getCitizenApiStatus } from '../services/api';
+import { ReportType, CitizenReportDraft, PublicReportPayload } from '../types';
+import { createPublicReport } from '../services/api';
 
 export const RequestHelpPage: React.FC = () => {
+  const navigate = useNavigate();
   const {
     locationData,
     isCustomLocationSet,
@@ -13,8 +14,6 @@ export const RequestHelpPage: React.FC = () => {
     gpsAccuracy,
     setSelectedCoordinates,
   } = useLocationContext();
-
-  const apiStatus = getCitizenApiStatus();
 
   // Form State matching backend ReportCreate contract
   const [reportType, setReportType] = useState<ReportType>('relief');
@@ -30,7 +29,8 @@ export const RequestHelpPage: React.FC = () => {
   // UI state
   const [validationError, setValidationError] = useState<string | null>(null);
   const [previewDraft, setPreviewDraft] = useState<CitizenReportDraft | null>(null);
-  const [isSubmittedStaged, setIsSubmittedStaged] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(null);
 
   // Sync location text if locationData updates from context
   useEffect(() => {
@@ -106,18 +106,37 @@ export const RequestHelpPage: React.FC = () => {
     const draft = validateForm();
     if (draft) {
       setPreviewDraft(draft);
-      setIsSubmittedStaged(false);
     }
   };
 
-  const handleStageSubmit = () => {
+  const handleSubmitRequest = async () => {
+    if (isSubmitting) return;
+
     const draft = validateForm();
     if (!draft) return;
 
-    // We do NOT dispatch to internal admin /reports endpoints.
-    // Instead we confirm the draft is staged locally and indicate the Batch 2 API state.
     setPreviewDraft(draft);
-    setIsSubmittedStaged(true);
+    setIsSubmitting(true);
+    setValidationError(null);
+
+    const payload: PublicReportPayload = {
+      report_type: draft.report_type,
+      category: draft.category,
+      description: draft.description,
+      location: draft.location,
+      people_affected: draft.people_affected,
+      required_quantity: draft.required_quantity,
+    };
+
+    const result = await createPublicReport(payload);
+
+    if (result.success) {
+      setSubmittedRequestId(result.request.request_id);
+    } else {
+      setValidationError(result.errorMessage);
+    }
+
+    setIsSubmitting(false);
   };
 
   return (
@@ -137,14 +156,6 @@ export const RequestHelpPage: React.FC = () => {
             Provide details about your situation so relief teams can assess priority, bundle required supplies,
             and coordinate field response.
           </p>
-        </div>
-
-        {/* API Staging Advisory */}
-        <div className="alert alert-info staging-banner" role="status">
-          <div className="alert-content">
-            <strong>System Notice:</strong> Public citizen report submission pipeline is currently in staging (Batch 1 foundation).
-            You can compose and preview your request draft below. Requests will NOT be sent to responder-internal endpoints until the verified citizen intake API is activated.
-          </div>
         </div>
 
         <div className="request-grid">
@@ -381,16 +392,17 @@ export const RequestHelpPage: React.FC = () => {
 
               {/* Form Action Buttons */}
               <div className="form-actions-card">
-                <button type="submit" className="btn btn-secondary btn-lg">
+                <button type="submit" className="btn btn-secondary btn-lg" disabled={isSubmitting || !!submittedRequestId}>
                   Preview Request Draft
                 </button>
 
                 <button
                   type="button"
                   className="btn btn-primary btn-lg"
-                  onClick={handleStageSubmit}
+                  onClick={handleSubmitRequest}
+                  disabled={isSubmitting || !!submittedRequestId}
                 >
-                  Verify &amp; Stage Request
+                  {isSubmitting ? 'Submitting...' : 'Submit Request'}
                 </button>
               </div>
             </form>
@@ -398,7 +410,35 @@ export const RequestHelpPage: React.FC = () => {
 
           {/* Sidebar / Preview Column */}
           <div className="form-sidebar-col">
-            {previewDraft ? (
+            {submittedRequestId ? (
+              <div className="preview-card success-card">
+                <div className="preview-header success-header">
+                  <span className="badge-preview badge-success">Request Submitted</span>
+                  <h4>Request Confirmed</h4>
+                </div>
+                <div className="preview-body">
+                  <div className="staged-success-notice">
+                    <div className="notice-icon">✅</div>
+                    <h5>Request Successfully Created</h5>
+                    <p>Your request has been received by the crisis response network.</p>
+                    <div className="request-id-display">
+                      <span className="request-id-label">Request ID:</span>
+                      <strong className="request-id-val">{submittedRequestId}</strong>
+                    </div>
+                    <small>Please save this ID to track your request status.</small>
+                  </div>
+                  <div className="preview-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-block"
+                      onClick={() => navigate(`/track?id=${submittedRequestId}`)}
+                    >
+                      Track Request Status
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : previewDraft ? (
               <div className="preview-card">
                 <div className="preview-header">
                   <span className="badge-preview">Request Draft Preview</span>
@@ -450,27 +490,16 @@ export const RequestHelpPage: React.FC = () => {
                   )}
                 </div>
 
-                {isSubmittedStaged ? (
-                  <div className="staged-success-notice">
-                    <div className="notice-icon">📋</div>
-                    <h5>Request Draft Prepared</h5>
-                    <p>
-                      Your crisis assistance draft has been compiled locally with verified schema fields.
-                      As part of Batch 1 separation, live submission will hook into the dedicated citizen endpoint in Batch 2.
-                    </p>
-                    <small>No unverified data was sent to internal responder queues.</small>
-                  </div>
-                ) : (
-                  <div className="preview-actions">
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-block"
-                      onClick={handleStageSubmit}
-                    >
-                      Stage This Draft
-                    </button>
-                  </div>
-                )}
+                <div className="preview-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-block"
+                    onClick={handleSubmitRequest}
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? 'Submitting...' : 'Submit Request'}
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="help-info-card">

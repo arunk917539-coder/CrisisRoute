@@ -1,14 +1,87 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { getPublicRequest } from '../services/api';
+import { PublicRequestResponse } from '../types';
 
 export const TrackRequestPage: React.FC = () => {
-  const [trackingCode, setTrackingCode] = useState('');
-  const [hasSearched, setHasSearched] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [trackingCode, setTrackingCode] = useState(searchParams.get('id') || '');
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [requestData, setRequestData] = useState<PublicRequestResponse | null>(null);
+
+  useEffect(() => {
+    const id = searchParams.get('id');
+    if (id) {
+      setTrackingCode(id);
+      fetchRequest(id);
+    }
+  }, [searchParams]);
+
+  const fetchRequest = async (idToSearch: string) => {
+    if (!idToSearch.trim()) return;
+
+    setIsLoading(true);
+    setErrorMsg(null);
+    setRequestData(null);
+
+    // Update URL without reloading
+    if (searchParams.get('id') !== idToSearch) {
+      setSearchParams({ id: idToSearch });
+    }
+
+    const result = await getPublicRequest(idToSearch.trim());
+
+    if (result.success && result.request) {
+      setRequestData(result.request);
+    } else {
+      setErrorMsg(result.errorMessage || 'Failed to retrieve request.');
+    }
+
+    setIsLoading(false);
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!trackingCode.trim()) return;
-    setHasSearched(true);
+    fetchRequest(trackingCode);
+  };
+
+  const formatStatus = (status: string) => {
+    switch (status) {
+      case 'under_review':
+        return 'Under Review';
+      case 'verified':
+        return 'Verified';
+      case 'assigned':
+        return 'Assigned / Scheduled';
+      case 'in_progress':
+        return 'In Progress / Out for Delivery';
+      case 'resolved':
+        return 'Resolved';
+      default:
+        return status.replace('_', ' ');
+    }
+  };
+
+  const formatSubmittedAt = (submittedAt: string | null | undefined) => {
+    if (!submittedAt) {
+      return 'N/A';
+    }
+
+    // Backend timestamps are UTC. If the backend does not include
+    // an explicit timezone suffix, treat the timestamp as UTC.
+    const utcTimestamp = submittedAt.endsWith('Z')
+      ? submittedAt
+      : `${submittedAt}Z`;
+
+    const date = new Date(utcTimestamp);
+
+    if (Number.isNaN(date.getTime())) {
+      return 'N/A';
+    }
+
+    // Convert to the user's browser-local timezone.
+    return date.toLocaleString();
   };
 
   return (
@@ -34,46 +107,104 @@ export const TrackRequestPage: React.FC = () => {
             <label htmlFor="tracking-code-input" className="form-label">
               Enter Your Request Reference Code:
             </label>
+
             <div className="input-group">
               <input
                 id="tracking-code-input"
                 type="text"
-                placeholder="e.g. CR-2026-XXXX"
+                placeholder="e.g. CR-1"
                 value={trackingCode}
-                onChange={(e) => {
-                  setTrackingCode(e.target.value);
-                  setHasSearched(false);
-                }}
+                onChange={(e) => setTrackingCode(e.target.value)}
                 className="form-input"
               />
-              <button type="submit" className="btn btn-primary">
-                Search Status
+
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={isLoading}
+              >
+                {isLoading ? 'Searching...' : 'Search Status'}
               </button>
             </div>
+
             <small className="form-helper">
               Your tracking code is generated upon successful submission of a citizen report.
             </small>
           </form>
 
-          {/* Staging / Placeholder Notice */}
-          <div className="track-status-box">
-            <div className="status-box-icon">⏳</div>
-            <div className="status-box-content">
-              <h4>Public Tracking System In Staging</h4>
-              <p>
-                As part of the Citizen Batch 1 architecture, the tracking portal structure is prepared.
-                Live tracking will activate once citizen request submissions are connected to the verified public pipeline.
-              </p>
-              <div className="privacy-badge">
-                🔒 Public Tracking Guarantee: Citizen status checks never expose internal responder reconciliation or operational logs.
+          {errorMsg && (
+            <div className="alert alert-danger mt-4" role="status">
+              <strong>Error:</strong> {errorMsg}
+            </div>
+          )}
+
+          {!requestData && !errorMsg && !isLoading && (
+            <div className="track-status-box mt-4">
+              <div className="status-box-content">
+                <h4>Check Request Status</h4>
+
+                <p>
+                  Enter your request reference code above to check the real-time status of your request.
+                </p>
+
+                <div className="privacy-badge mt-4">
+                  🔒 Public Tracking Guarantee: Citizen status checks never expose internal responder reconciliation or operational logs.
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {hasSearched && (
-            <div className="alert alert-warning mt-4" role="status">
-              <strong>Tracking Code Staging:</strong> Code <code>{trackingCode}</code> was received.
-              Live query lookups will connect to the citizen tracking backend in Batch 2.
+          {requestData && (
+            <div className="track-status-box mt-4">
+              <div className="status-box-content">
+                <h4>
+                  Request Status:{' '}
+                  <span className="status-badge capitalize">
+                    {formatStatus(requestData.status)}
+                  </span>
+                </h4>
+
+                <div className="preview-body mt-3">
+                  <div className="preview-item">
+                    <span className="preview-label">Request ID:</span>
+                    <span className="preview-val">
+                      <strong>{requestData.request_id}</strong>
+                    </span>
+                  </div>
+
+                  <div className="preview-item">
+                    <span className="preview-label">Category:</span>
+                    <span className="preview-val capitalize">
+                      {requestData.category}
+                    </span>
+                  </div>
+
+                  <div className="preview-item">
+                    <span className="preview-label">Location:</span>
+                    <span className="preview-val">
+                      {requestData.location}
+                    </span>
+                  </div>
+
+                  <div className="preview-item">
+                    <span className="preview-label">Description:</span>
+                    <p className="preview-desc">
+                      {requestData.description}
+                    </p>
+                  </div>
+
+                  <div className="preview-item">
+                    <span className="preview-label">Submitted At:</span>
+                    <span className="preview-val">
+                      {formatSubmittedAt(requestData.submitted_at)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="privacy-badge mt-4">
+                  🔒 Public Tracking Guarantee: Citizen status checks never expose internal responder reconciliation or operational logs.
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -104,4 +235,5 @@ export const TrackRequestPage: React.FC = () => {
       </div>
     </div>
   );
+
 };
