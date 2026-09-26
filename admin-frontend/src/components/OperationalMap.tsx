@@ -75,6 +75,18 @@ function AutoCenterMap({ items }: { items: MapNeedItem[] }) {
   return null
 }
 
+// Map resizer helper
+function MapResizer() {
+  const map = useMap()
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      map.invalidateSize()
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [map])
+  return null
+}
+
 export function OperationalMap({ apiBaseUrl, refreshTrigger }: OperationalMapProps) {
   const [mapState, setMapState] = useState<'loading' | 'connected' | 'failed'>('loading')
   const [mapData, setMapData] = useState<MapNeedsResponse | null>(null)
@@ -113,11 +125,30 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger }: OperationalMapPro
 
   const defaultCenter: [number, number] = [12.9716, 77.5946] // Bangalore default coordinates
 
+  // Filter out any items with invalid coordinates to prevent crashes
+  const validItems = mapData?.items.filter(item => Number.isFinite(item.latitude) && Number.isFinite(item.longitude)) || []
+
   return (
-    <div className="status-card" style={{ marginTop: '2rem', marginBottom: '2rem' }}>
-      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+    <div style={{
+      backgroundColor: 'var(--panel-bg)',
+      border: '1px solid var(--panel-border)',
+      borderRadius: '0.75rem',
+      boxShadow: 'var(--shadow-md)',
+      marginTop: '2rem',
+      marginBottom: '2rem',
+      overflow: 'hidden'
+    }}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '1.25rem 1.5rem',
+        borderBottom: '1px solid var(--panel-border)',
+        flexWrap: 'wrap',
+        gap: '1rem'
+      }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <span className="card-title">Operational Map</span>
+          <span style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--text-main)' }}>Operational Map</span>
           <span className="status-badge connected">
             <span className="status-dot"></span>
             Verified Needs Only
@@ -127,53 +158,55 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger }: OperationalMapPro
           <div style={{ display: 'flex', gap: '1.25rem', fontSize: '0.875rem' }}>
             <div>
               <span className="info-label" style={{ marginRight: '0.375rem' }}>Active Verified Needs:</span>
-              <strong style={{ color: '#f59e0b', fontSize: '1rem' }}>{mapData.active_verified_needs_count}</strong>
+              <strong style={{ color: '#f59e0b', fontSize: '1.125rem' }}>{mapData.active_verified_needs_count}</strong>
             </div>
             <div>
               <span className="info-label" style={{ marginRight: '0.375rem' }}>People Affected:</span>
-              <strong style={{ color: '#3b82f6', fontSize: '1rem' }}>{mapData.active_people_affected}</strong>
+              <strong style={{ color: '#3b82f6', fontSize: '1.125rem' }}>{mapData.active_people_affected}</strong>
             </div>
           </div>
         )}
       </div>
 
-      <div className="card-body" style={{ padding: '0', position: 'relative' }}>
+      <div style={{ position: 'relative', width: '100%' }}>
         {mapState === 'loading' && (
-          <div className="loading-state" style={{ padding: '2rem' }}>Loading map data...</div>
+          <div className="loading-state" style={{ padding: '3rem' }}>Loading map data...</div>
         )}
 
         {mapState === 'failed' && (
-          <div className="error-box" style={{ margin: '1rem' }}>
+          <div className="error-box" style={{ margin: '1.5rem' }}>
             <strong>Map Data Unavailable:</strong> {errorMsg}
           </div>
         )}
 
-        {mapState === 'connected' && mapData && mapData.items.length === 0 && (
-          <div className="empty-state" style={{ margin: '1rem', border: '1px dashed var(--panel-border, #263247)' }}>
+        {mapState === 'connected' && validItems.length === 0 && (
+          <div className="empty-state" style={{ margin: '1.5rem', border: '1px dashed var(--panel-border)' }}>
             No verified needs with map coordinates yet.
           </div>
         )}
 
-        {mapState === 'connected' && mapData && (
-          <div style={{ height: '450px', width: '100%', borderRadius: '0 0 10px 10px', overflow: 'hidden', position: 'relative' }}>
+        {mapState === 'connected' && validItems.length > 0 && (
+          <div className="operational-map-leaflet">
             <MapContainer
-              center={mapData.items.length > 0 ? [mapData.items[0].latitude, mapData.items[0].longitude] : defaultCenter}
+              center={validItems.length > 0 ? [validItems[0].latitude, validItems[0].longitude] : defaultCenter}
               zoom={11}
-              style={{ height: '100%', width: '100%', backgroundColor: '#0b1220' }}
+              className="operational-map-leaflet"
+              style={{ backgroundColor: '#0b1220' }}
             >
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
 
-              {mapData.items.length > 0 && <AutoCenterMap items={mapData.items} />}
+              <MapResizer />
+              {validItems.length > 0 && <AutoCenterMap items={validItems} />}
 
-              {mapData.items.map((item) => {
+              {validItems.map((item) => {
                 const markerIcon = createCustomMarkerIcon(item.uncovered_quantity, item.allocated_quantity)
                 return (
                   <Marker
                     key={item.need_id}
-                    position={[item.latitude, item.longitude]}
+                    position={[Number(item.latitude), Number(item.longitude)]}
                     icon={markerIcon}
                   >
                     <Popup className="custom-map-popup">

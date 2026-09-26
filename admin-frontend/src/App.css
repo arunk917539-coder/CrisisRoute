@@ -1026,3 +1026,9 @@ div[style*="border: 1px solid #ef4444"] {
   color: #cbd5e1 !important;
 }
 
+.operational-map-leaflet {
+  height: 440px;
+  width: 100%;
+  min-height: 400px;
+  z-index: 1;
+}
