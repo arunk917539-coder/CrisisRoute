@@ -19,11 +19,12 @@ export const TrackRequestPage: React.FC = () => {
   }, [searchParams]);
 
   const fetchRequest = async (idToSearch: string) => {
-    if (!idToSearch.trim()) return;
+    if (!idToSearch.trim() || isLoading) return;
 
     setIsLoading(true);
     setErrorMsg(null);
-    setRequestData(null);
+
+    // We intentionally don't clear requestData here so the UI doesn't flash empty while refreshing
 
     // Update URL without reloading
     if (searchParams.get('id') !== idToSearch) {
@@ -35,7 +36,12 @@ export const TrackRequestPage: React.FC = () => {
     if (result.success && result.request) {
       setRequestData(result.request);
     } else {
-      setErrorMsg(result.errorMessage || 'Failed to retrieve request.');
+      setRequestData(null);
+      if (result.errorMessage?.toLowerCase().includes('failed to fetch') || result.errorMessage?.toLowerCase().includes('network error')) {
+        setErrorMsg('Network error: Unable to reach the server. Please check your connection and try again.');
+      } else {
+        setErrorMsg(result.errorMessage || 'Failed to retrieve request. Please ensure the Request ID is correct.');
+      }
     }
 
     setIsLoading(false);
@@ -60,6 +66,23 @@ export const TrackRequestPage: React.FC = () => {
         return 'Resolved';
       default:
         return status.replace('_', ' ');
+    }
+  };
+
+  const getStatusDescription = (status: string) => {
+    switch (status) {
+      case 'under_review':
+        return 'Your request has been received and is currently being reviewed by response coordinators.';
+      case 'verified':
+        return 'Your request has been verified and added to the active response queue.';
+      case 'assigned':
+        return 'A response team has been assigned to address your situation.';
+      case 'in_progress':
+        return 'Help is on the way. The response team is currently in progress or out for delivery.';
+      case 'resolved':
+        return 'This request has been marked as resolved by the response team.';
+      default:
+        return 'Status is currently being updated.';
     }
   };
 
@@ -121,9 +144,9 @@ export const TrackRequestPage: React.FC = () => {
               <button
                 type="submit"
                 className="btn btn-primary"
-                disabled={isLoading}
+                disabled={isLoading || !trackingCode.trim()}
               >
-                {isLoading ? 'Searching...' : 'Search Status'}
+                {isLoading && !requestData ? 'Searching...' : 'Search Status'}
               </button>
             </div>
 
@@ -133,8 +156,20 @@ export const TrackRequestPage: React.FC = () => {
           </form>
 
           {errorMsg && (
-            <div className="alert alert-danger mt-4" role="status">
-              <strong>Error:</strong> {errorMsg}
+            <div className="alert alert-danger mt-4" role="status" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <strong>Error:</strong> {errorMsg}
+              </div>
+              <div>
+                <button
+                  className="btn btn-outline btn-sm"
+                  onClick={() => fetchRequest(trackingCode)}
+                  disabled={isLoading}
+                  style={{ backgroundColor: '#fff' }}
+                >
+                  {isLoading ? 'Retrying...' : 'Retry Request'}
+                </button>
+              </div>
             </div>
           )}
 
@@ -157,12 +192,28 @@ export const TrackRequestPage: React.FC = () => {
           {requestData && (
             <div className="track-status-box mt-4">
               <div className="status-box-content">
-                <h4>
-                  Request Status:{' '}
-                  <span className="status-badge capitalize">
-                    {formatStatus(requestData.status)}
-                  </span>
-                </h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+                  <div>
+                    <h4 style={{ marginBottom: '8px' }}>
+                      Request Status:{' '}
+                      <span className="status-badge capitalize">
+                        {formatStatus(requestData.status)}
+                      </span>
+                    </h4>
+                    <p style={{ color: 'var(--slate-600)', fontSize: '14px', margin: 0, maxWidth: '500px' }}>
+                      {getStatusDescription(requestData.status)}
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => fetchRequest(requestData.request_id)}
+                    className="btn btn-secondary"
+                    disabled={isLoading}
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    {isLoading ? 'Refreshing...' : 'Check Latest Status'}
+                  </button>
+                </div>
 
                 <div className="preview-body mt-3">
                   <div className="preview-item">
