@@ -84,6 +84,10 @@ function App() {
   const [decisionSuccessMessage, setDecisionSuccessMessage] = useState<string>('')
   const [confirmAction, setConfirmAction] = useState<{ id: number, decision: 'accept' | 'reject' | 'unresolved', label: string } | null>(null)
 
+  const [reviewingEvidenceId, setReviewingEvidenceId] = useState<number | null>(null)
+  const [evidenceReviewError, setEvidenceReviewError] = useState<string>('')
+  const [evidenceReviewSuccess, setEvidenceReviewSuccess] = useState<string>('')
+
   useEffect(() => {
     let ignore = false
 
@@ -250,11 +254,47 @@ function App() {
     }
   }
 
+  const submitEvidenceReview = async (reportId: number) => {
+    setReviewingEvidenceId(reportId)
+    setEvidenceReviewError('')
+    setEvidenceReviewSuccess('')
+    try {
+      const response = await fetch(`${API_BASE_URL}/reports/${reportId}/evidence/review`, {
+        method: 'POST',
+      })
+      if (!response.ok) throw new Error(`Review API returned ${response.status}`)
+      
+      const data = await response.json()
+      if (data.already_recorded) {
+        setEvidenceReviewSuccess('Evidence was already reviewed.')
+      } else {
+        setEvidenceReviewSuccess('Evidence reviewed successfully.')
+      }
+      setTimeout(() => setEvidenceReviewSuccess(''), 4000)
+      
+      if (selectedReport && selectedReport.id === reportId) {
+        const evResponse = await fetch(`${API_BASE_URL}/reports/${reportId}/evidence`)
+        if (evResponse.ok) {
+          const evData: EvidenceResponse = await evResponse.json()
+          setEvidenceData(evData)
+        }
+      }
+      
+      handleRefreshData()
+    } catch (err) {
+      setEvidenceReviewError(err instanceof Error ? err.message : 'Failed to submit evidence review')
+    } finally {
+      setReviewingEvidenceId(null)
+    }
+  }
+
   const handleOpenReport = async (report: Report) => {
     setSelectedReport(report)
     setEvidenceState('loading')
     setEvidenceError('')
     setEvidenceData(null)
+    setEvidenceReviewError('')
+    setEvidenceReviewSuccess('')
     
     try {
       const response = await fetch(`${API_BASE_URL}/reports/${report.id}/evidence`)
@@ -270,6 +310,8 @@ function App() {
 
   const handleCloseReport = () => {
     setSelectedReport(null)
+    setEvidenceReviewError('')
+    setEvidenceReviewSuccess('')
   }
 
   return (
@@ -670,6 +712,28 @@ function App() {
                         {evidenceData.human_review_required ? 'YES' : 'NO'}
                       </span>
                     </div>
+                  </div>
+                )}
+
+                {evidenceState === 'connected' && evidenceData && evidenceData.human_review_required && (
+                  <div style={{ marginTop: '1rem', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '1rem' }}>
+                    {evidenceReviewError && (
+                      <div className="error-state" style={{ padding: '0.75rem', marginBottom: '1rem' }}>
+                        <strong>Error:</strong> {evidenceReviewError}
+                      </div>
+                    )}
+                    {evidenceReviewSuccess && (
+                      <div className="success-message" style={{ marginBottom: '1rem' }}>
+                        {evidenceReviewSuccess}
+                      </div>
+                    )}
+                    <button 
+                      className="btn-action confirm" 
+                      onClick={() => submitEvidenceReview(evidenceData.report_id)}
+                      disabled={reviewingEvidenceId === evidenceData.report_id}
+                    >
+                      {reviewingEvidenceId === evidenceData.report_id ? 'Submitting...' : 'Mark Evidence as Reviewed'}
+                    </button>
                   </div>
                 )}
               </div>
