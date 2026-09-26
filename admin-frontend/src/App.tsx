@@ -158,6 +158,13 @@ function App() {
   const [allocError, setAllocError] = useState('')
   const [allocSuccess, setAllocSuccess] = useState('')
 
+  const [deliveryNeedId, setDeliveryNeedId] = useState<number | ''>('')
+  const [deliveryAllocationId, setDeliveryAllocationId] = useState<number | ''>('')
+  const [deliveryQuantity, setDeliveryQuantity] = useState<number | ''>('')
+  const [deliveringState, setDeliveringState] = useState(false)
+  const [deliveryError, setDeliveryError] = useState('')
+  const [deliverySuccess, setDeliverySuccess] = useState('')
+
   useEffect(() => {
     let ignore = false
 
@@ -602,6 +609,78 @@ function App() {
       setAllocError(err instanceof Error ? err.message : 'Failed to allocate resource')
     } finally {
       setAllocatingState(false)
+    }
+  }
+
+  const submitDelivery = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (deliveryNeedId === '' || deliveryQuantity === '' || deliveryQuantity <= 0) {
+      setDeliveryError('Please fill out all required fields correctly. Quantity must be > 0.')
+      return
+    }
+
+    const need = coverage.find(n => n.need_id === deliveryNeedId)
+    if (!need) {
+      setDeliveryError('Selected need does not exist.')
+      return
+    }
+
+    if (deliveryAllocationId !== '') {
+      const allocation = allocations.find(a => a.id === deliveryAllocationId)
+      if (!allocation) {
+        setDeliveryError('Selected allocation does not exist.')
+        return
+      }
+      if (allocation.need_id !== deliveryNeedId) {
+        setDeliveryError('Selected allocation does not belong to the selected need.')
+        return
+      }
+      if (deliveryQuantity > allocation.remaining_quantity) {
+        setDeliveryError('Delivery quantity cannot exceed the allocation remaining quantity.')
+        return
+      }
+    }
+
+    if (deliveryQuantity > need.uncovered_quantity) {
+      setDeliveryError("Delivery quantity cannot exceed the need's remaining uncovered quantity.")
+      return
+    }
+    
+    setDeliveringState(true)
+    setDeliveryError('')
+    setDeliverySuccess('')
+    try {
+      const payload: any = {
+        need_id: Number(deliveryNeedId),
+        delivered_quantity: Number(deliveryQuantity)
+      }
+      if (deliveryAllocationId !== '') {
+        payload.allocation_id = Number(deliveryAllocationId)
+      }
+
+      const response = await fetch(`${API_BASE_URL}/deliveries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      
+      if (!response.ok) {
+        const errData = await response.json().catch(() => null)
+        throw new Error(errData?.detail || `API returned ${response.status}`)
+      }
+      
+      setDeliverySuccess('Delivery recorded successfully')
+      setTimeout(() => setDeliverySuccess(''), 4000)
+      
+      setDeliveryNeedId('')
+      setDeliveryAllocationId('')
+      setDeliveryQuantity('')
+      
+      handleRefreshData()
+    } catch (err) {
+      setDeliveryError(err instanceof Error ? err.message : 'Failed to record delivery')
+    } finally {
+      setDeliveringState(false)
     }
   }
 
@@ -1074,6 +1153,55 @@ function App() {
               
               {allocError && <div className="error-state" style={{ marginTop: '1rem', marginBottom: 0 }}>{allocError}</div>}
               {allocSuccess && <div className="success-message" style={{ marginTop: '1rem', marginBottom: 0 }}>{allocSuccess}</div>}
+            </div>
+          </div>
+        </div>
+
+        <div className="section-header" style={{ marginTop: '3rem' }}>
+          <h2>Record Delivery</h2>
+        </div>
+        <div className="reports-grid">
+          <div className="report-card" style={{ gridColumn: '1 / -1', border: '1px solid #3b82f6' }}>
+            <div className="report-body">
+              <form onSubmit={submitDelivery} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', alignItems: 'end' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <label className="report-meta-label">Select Verified Need</label>
+                  <select className="input-field" value={deliveryNeedId} onChange={e => {
+                    setDeliveryNeedId(e.target.value === '' ? '' : Number(e.target.value))
+                    setDeliveryAllocationId('')
+                    setDeliveryQuantity('')
+                  }} required style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }}>
+                    <option value="">-- Select Need --</option>
+                    {coverage.filter(n => n.uncovered_quantity > 0).map(n => (
+                      <option key={n.need_id} value={n.need_id}>Need #{n.need_id} ({n.uncovered_quantity} {n.unit} uncovered)</option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <label className="report-meta-label">Select Allocation (Optional)</label>
+                  <select className="input-field" value={deliveryAllocationId} onChange={e => setDeliveryAllocationId(e.target.value === '' ? '' : Number(e.target.value))} disabled={!deliveryNeedId} style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)', opacity: !deliveryNeedId ? 0.5 : 1 }}>
+                    <option value="">-- No Allocation / Direct Delivery --</option>
+                    {deliveryNeedId && allocations.filter(a => a.need_id === deliveryNeedId && a.remaining_quantity > 0).map(a => (
+                      <option key={a.id} value={a.id}>Alloc #{a.id} ({a.remaining_quantity} remaining)</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <label className="report-meta-label">Delivered Quantity</label>
+                  <input type="number" className="input-field" placeholder="Quantity" value={deliveryQuantity} onChange={e => setDeliveryQuantity(e.target.value === '' ? '' : Number(e.target.value))} required min={1} style={{ padding: '0.5rem', borderRadius: '0.25rem', border: '1px solid var(--panel-border)', background: 'var(--bg-dark)', color: 'var(--text-main)' }} />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <button type="submit" className="btn-action confirm" style={{ backgroundColor: '#3b82f6' }} disabled={deliveringState}>
+                    {deliveringState ? 'Recording...' : 'Record Delivery'}
+                  </button>
+                </div>
+              </form>
+              
+              {deliveryError && <div className="error-state" style={{ marginTop: '1rem', marginBottom: 0 }}>{deliveryError}</div>}
+              {deliverySuccess && <div className="success-message" style={{ marginTop: '1rem', marginBottom: 0 }}>{deliverySuccess}</div>}
             </div>
           </div>
         </div>
