@@ -1270,8 +1270,8 @@ function App() {
                   <div className="report-body">
                     <div className="report-meta-grid">
                       <div className="report-meta-item"><span className="report-meta-label">Allocated Qty</span><span className="report-meta-value">{alloc.allocated_quantity}</span></div>
-                      <div className="report-meta-item"><span className="report-meta-label">Delivered Qty</span><span className="report-meta-value">{alloc.delivered_quantity}</span></div>
-                      <div className="report-meta-item"><span className="report-meta-label">Remaining Qty</span><span className="report-meta-value">{alloc.remaining_quantity}</span></div>
+                      <div className="report-meta-item"><span className="report-meta-label">Delivered via this Allocation</span><span className="report-meta-value">{alloc.delivered_quantity}</span></div>
+                      <div className="report-meta-item"><span className="report-meta-label">Remaining in Allocation</span><span className="report-meta-value">{alloc.remaining_quantity}</span></div>
                     </div>
                   </div>
                 </div>
