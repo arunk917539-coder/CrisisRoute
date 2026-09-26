@@ -26,6 +26,32 @@ interface Report {
   verification_status: string
 }
 
+interface QueueItem {
+  relationship_id: number
+  relationship_type: string
+  similarity: number
+  reason: string
+  decision_guidance: string
+  report_a: Report
+  report_b: Report
+}
+
+interface QueueResponse {
+  count: number
+  items: QueueItem[]
+}
+
+interface EvidenceResponse {
+  report_id: number
+  evidence_status: string
+  evidence_source: string
+  evidence_note: string
+  observed_at: string
+  age_minutes: number | null
+  freshness: string
+  human_review_required: boolean
+}
+
 type ConnectionState = 'loading' | 'connected' | 'failed'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
@@ -42,6 +68,15 @@ function App() {
   const [reportsState, setReportsState] = useState<ConnectionState>('loading')
   const [reports, setReports] = useState<Report[]>([])
   const [reportsError, setReportsError] = useState<string>('')
+
+  const [queueState, setQueueState] = useState<ConnectionState>('loading')
+  const [queueData, setQueueData] = useState<QueueResponse | null>(null)
+  const [queueError, setQueueError] = useState<string>('')
+
+  const [selectedReport, setSelectedReport] = useState<Report | null>(null)
+  const [evidenceState, setEvidenceState] = useState<ConnectionState>('loading')
+  const [evidenceData, setEvidenceData] = useState<EvidenceResponse | null>(null)
+  const [evidenceError, setEvidenceError] = useState<string>('')
 
   useEffect(() => {
     let ignore = false
@@ -98,9 +133,27 @@ function App() {
       }
     }
 
+    async function fetchQueue() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/reconciliation/queue`)
+        if (!response.ok) throw new Error(`Queue API returned ${response.status}`)
+        const data: QueueResponse = await response.json()
+        if (!ignore) {
+          setQueueData(data)
+          setQueueState('connected')
+        }
+      } catch (err) {
+        if (!ignore) {
+          setQueueState('failed')
+          setQueueError(err instanceof Error ? err.message : 'Failed to load queue')
+        }
+      }
+    }
+
     fetchHealth()
     fetchDashboard()
     fetchReports()
+    fetchQueue()
 
     return () => {
       ignore = true
@@ -128,6 +181,8 @@ function App() {
     setDashboardError('')
     setReportsState('loading')
     setReportsError('')
+    setQueueState('loading')
+    setQueueError('')
     
     try {
       const response = await fetch(`${API_BASE_URL}/dashboard`)
@@ -150,8 +205,40 @@ function App() {
       setReportsState('failed')
       setReportsError(err instanceof Error ? err.message : 'Failed to load reports')
     }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/reconciliation/queue`)
+      if (!response.ok) throw new Error(`Queue API returned ${response.status}`)
+      const data: QueueResponse = await response.json()
+      setQueueData(data)
+      setQueueState('connected')
+    } catch (err) {
+      setQueueState('failed')
+      setQueueError(err instanceof Error ? err.message : 'Failed to load queue')
+    }
   }
 
+  const handleOpenReport = async (report: Report) => {
+    setSelectedReport(report)
+    setEvidenceState('loading')
+    setEvidenceError('')
+    setEvidenceData(null)
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/reports/${report.id}/evidence`)
+      if (!response.ok) throw new Error(`Evidence API returned ${response.status}`)
+      const data: EvidenceResponse = await response.json()
+      setEvidenceData(data)
+      setEvidenceState('connected')
+    } catch (err) {
+      setEvidenceState('failed')
+      setEvidenceError(err instanceof Error ? err.message : 'Failed to fetch evidence details')
+    }
+  }
+
+  const handleCloseReport = () => {
+    setSelectedReport(null)
+  }
 
   return (
     <div className="app-container">
@@ -262,6 +349,79 @@ function App() {
           </div>
         )}
 
+        <h2 className="section-title" style={{ marginTop: '2rem' }}>Reconciliation Queue</h2>
+        
+        {queueState === 'loading' && (
+          <div className="loading-state">Loading queue items...</div>
+        )}
+
+        {queueState === 'failed' && (
+          <div className="error-state">
+            <strong>Error loading reconciliation queue:</strong> {queueError}
+          </div>
+        )}
+
+        {queueState === 'connected' && queueData?.items.length === 0 && (
+          <div className="empty-state">Queue is clear! No relationships to reconcile.</div>
+        )}
+
+        {queueState === 'connected' && queueData && queueData.items.length > 0 && (
+          <div className="queue-list">
+            {queueData.items.map((item) => (
+              <div key={item.relationship_id} className="queue-card">
+                <div className="queue-header">
+                  <div className="queue-title">
+                    <span className={`queue-type-badge ${item.relationship_type}`}>
+                      {item.relationship_type.replace('_', ' ')}
+                    </span>
+                    <span className="queue-reason">{item.reason}</span>
+                  </div>
+                  <div className="queue-similarity">
+                    Similarity: {(item.similarity * 100).toFixed(1)}%
+                  </div>
+                </div>
+                
+                <div className="queue-compare-grid">
+                  <div className="queue-report-box">
+                    <div className="queue-report-header">
+                      <span className="report-id">Report A: #{item.report_a.id}</span>
+                      <button className="btn-open-report" onClick={() => handleOpenReport(item.report_a)}>
+                        Open
+                      </button>
+                    </div>
+                    <div className="report-meta-item">
+                      <span className="report-meta-label">Description</span>
+                      <span className="report-meta-value">"{item.report_a.description}"</span>
+                    </div>
+                    <div className="report-meta-item">
+                      <span className="report-meta-label">Location</span>
+                      <span className="report-meta-value">{item.report_a.location}</span>
+                    </div>
+                  </div>
+
+                  <div className="queue-report-box">
+                    <div className="queue-report-header">
+                      <span className="report-id">Report B: #{item.report_b.id}</span>
+                      <button className="btn-open-report" onClick={() => handleOpenReport(item.report_b)}>
+                        Open
+                      </button>
+                    </div>
+                    <div className="report-meta-item">
+                      <span className="report-meta-label">Description</span>
+                      <span className="report-meta-value">"{item.report_b.description}"</span>
+                    </div>
+                    <div className="report-meta-item">
+                      <span className="report-meta-label">Location</span>
+                      <span className="report-meta-value">{item.report_b.location}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+
         <h2 className="section-title" style={{ marginTop: '2rem' }}>Incoming Reports</h2>
 
         {reportsState === 'loading' && (
@@ -290,13 +450,17 @@ function App() {
                       {report.report_type}
                     </span>
                   </div>
-                  <span className="report-meta-label">
-                    {new Date(report.timestamp).toLocaleString()}
-                  </span>
+                  <button className="btn-open-report" onClick={() => handleOpenReport(report)}>
+                    Open Report
+                  </button>
                 </div>
                 <div className="report-body">
                   <p className="report-description">{report.description}</p>
                   <div className="report-meta-grid">
+                    <div className="report-meta-item">
+                      <span className="report-meta-label">Timestamp</span>
+                      <span className="report-meta-value">{new Date(report.timestamp).toLocaleString()}</span>
+                    </div>
                     <div className="report-meta-item">
                       <span className="report-meta-label">Location</span>
                       <span className="report-meta-value">{report.location}</span>
@@ -322,6 +486,107 @@ function App() {
           </div>
         )}
       </main>
+
+      {/* Report Details Modal */}
+      {selectedReport && (
+        <div className="modal-overlay" onClick={handleCloseReport}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">
+                <span className="report-id">#{selectedReport.id}</span>
+                <span>{selectedReport.category}</span>
+                <span className={`report-type-badge ${selectedReport.report_type}`}>
+                  {selectedReport.report_type}
+                </span>
+              </div>
+              <button className="modal-close" onClick={handleCloseReport}>&times;</button>
+            </div>
+            
+            <div className="modal-body">
+              <div className="report-meta-item">
+                <span className="report-meta-label">Description</span>
+                <span className="report-meta-value">{selectedReport.description}</span>
+              </div>
+
+              <div className="report-meta-grid">
+                <div className="report-meta-item">
+                  <span className="report-meta-label">Timestamp</span>
+                  <span className="report-meta-value">{new Date(selectedReport.timestamp).toLocaleString()}</span>
+                </div>
+                <div className="report-meta-item">
+                  <span className="report-meta-label">Location</span>
+                  <span className="report-meta-value">{selectedReport.location}</span>
+                </div>
+                <div className="report-meta-item">
+                  <span className="report-meta-label">People Affected</span>
+                  <span className="report-meta-value">{selectedReport.people_affected}</span>
+                </div>
+                <div className="report-meta-item">
+                  <span className="report-meta-label">Required Qty</span>
+                  <span className="report-meta-value">{selectedReport.required_quantity}</span>
+                </div>
+                <div className="report-meta-item">
+                  <span className="report-meta-label">Verification</span>
+                  <span className="report-meta-value" style={{ textTransform: 'capitalize' }}>
+                    {selectedReport.verification_status}
+                  </span>
+                </div>
+              </div>
+
+              <div className="evidence-section">
+                <div className="evidence-title">Evidence & Verification</div>
+                
+                {evidenceState === 'loading' && (
+                  <div className="loading-state" style={{ padding: '2rem 1rem' }}>Loading evidence...</div>
+                )}
+                
+                {evidenceState === 'failed' && (
+                  <div className="error-state" style={{ padding: '1rem', marginBottom: 0 }}>
+                    <strong>Error:</strong> {evidenceError}
+                  </div>
+                )}
+                
+                {evidenceState === 'connected' && evidenceData && (
+                  <div className="report-meta-grid" style={{ background: 'transparent', padding: 0, border: 'none' }}>
+                    <div className="report-meta-item">
+                      <span className="report-meta-label">Evidence Status</span>
+                      <span className="report-meta-value" style={{ textTransform: 'capitalize' }}>
+                        {evidenceData.evidence_status}
+                      </span>
+                    </div>
+                    <div className="report-meta-item">
+                      <span className="report-meta-label">Evidence Source</span>
+                      <span className="report-meta-value">{evidenceData.evidence_source || 'N/A'}</span>
+                    </div>
+                    <div className="report-meta-item">
+                      <span className="report-meta-label">Evidence Note</span>
+                      <span className="report-meta-value">{evidenceData.evidence_note || 'N/A'}</span>
+                    </div>
+                    <div className="report-meta-item">
+                      <span className="report-meta-label">Observed At</span>
+                      <span className="report-meta-value">
+                        {evidenceData.observed_at ? new Date(evidenceData.observed_at).toLocaleString() : 'N/A'}
+                      </span>
+                    </div>
+                    <div className="report-meta-item">
+                      <span className="report-meta-label">Freshness</span>
+                      <span className="report-meta-value evidence-field-value" style={{ textTransform: 'capitalize' }}>
+                        {evidenceData.freshness}
+                      </span>
+                    </div>
+                    <div className="report-meta-item">
+                      <span className="report-meta-label">Human Review Required</span>
+                      <span className="report-meta-value evidence-field-value">
+                        {evidenceData.human_review_required ? 'YES' : 'NO'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
