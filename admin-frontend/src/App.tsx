@@ -59,6 +59,8 @@ interface Resource {
   resource_type: string
   unit: string
   location: string
+  latitude?: number
+  longitude?: number
   available_quantity: number
   allocated_quantity: number
   status: string
@@ -146,6 +148,8 @@ function App() {
     resource_type: '',
     unit: 'units',
     location: '',
+    latitude: '',
+    longitude: '',
     available_quantity: '' as number | '',
     source: ''
   })
@@ -522,6 +526,8 @@ function App() {
           resource_type: newResource.resource_type,
           unit: newResource.unit,
           location: newResource.location,
+          latitude: newResource.latitude === '' ? null : Number(newResource.latitude),
+          longitude: newResource.longitude === '' ? null : Number(newResource.longitude),
           available_quantity: Number(newResource.available_quantity),
           source: newResource.source,
           status: 'active'
@@ -540,6 +546,8 @@ function App() {
         resource_type: '',
         unit: 'units',
         location: '',
+        latitude: '',
+        longitude: '',
         available_quantity: '',
         source: ''
       })
@@ -841,7 +849,7 @@ function App() {
           </div>
         )}
 
-        <OperationalMap apiBaseUrl={API_BASE_URL} refreshTrigger={mapRefreshKey} />
+        <OperationalMap apiBaseUrl={API_BASE_URL} refreshTrigger={mapRefreshKey} resources={resources} allocations={allocations} />
 
         <h2 className="section-title" style={{ marginTop: '2rem' }}>Reconciliation Queue</h2>
         
@@ -1059,6 +1067,8 @@ function App() {
                   <input type="text" placeholder="Resource Type (e.g. supplies)" value={newResource.resource_type} onChange={e => setNewResource({...newResource, resource_type: e.target.value})} required minLength={2} className="input-field" />
                   <input type="text" placeholder="Unit (e.g. liters)" value={newResource.unit} onChange={e => setNewResource({...newResource, unit: e.target.value})} required minLength={1} className="input-field" />
                   <input type="text" placeholder="Location" value={newResource.location} onChange={e => setNewResource({...newResource, location: e.target.value})} required minLength={2} className="input-field" />
+                  <input type="number" step="any" min="-90" max="90" placeholder="Latitude (optional)" value={newResource.latitude} onChange={e => setNewResource({...newResource, latitude: e.target.value})} className="input-field" />
+                  <input type="number" step="any" min="-180" max="180" placeholder="Longitude (optional)" value={newResource.longitude} onChange={e => setNewResource({...newResource, longitude: e.target.value})} className="input-field" />
                   <input type="number" placeholder="Available Quantity" value={newResource.available_quantity} onChange={e => setNewResource({...newResource, available_quantity: e.target.value === '' ? '' : Number(e.target.value)})} required min={1} className="input-field" />
                   <input type="text" placeholder="Source (e.g. Warehouse A)" value={newResource.source} onChange={e => setNewResource({...newResource, source: e.target.value})} required minLength={2} className="input-field" />
                   {addResourceError && <div className="error-state" style={{ padding: '0.5rem', margin: 0 }}>{addResourceError}</div>}

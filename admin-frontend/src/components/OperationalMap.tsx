@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, useMap, GeoJSON } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 
@@ -25,9 +25,22 @@ interface MapNeedsResponse {
   items: MapNeedItem[]
 }
 
+interface ResourceMapInfo {
+  id: number
+  name: string
+  latitude?: number
+  longitude?: number
+}
+interface AllocationMapInfo {
+  need_id: number
+  resource_id: number
+}
+
 interface OperationalMapProps {
   apiBaseUrl: string
   refreshTrigger?: number
+  resources?: ResourceMapInfo[]
+  allocations?: AllocationMapInfo[]
 }
 
 // Marker icon helpers
@@ -87,10 +100,67 @@ function MapResizer() {
   return null
 }
 
-export function OperationalMap({ apiBaseUrl, refreshTrigger }: OperationalMapProps) {
+function AutoFitRoute({ routeGeometry }: { routeGeometry: any }) {
+  const map = useMap()
+  useEffect(() => {
+    if (routeGeometry && routeGeometry.coordinates) {
+      const latLngs = routeGeometry.coordinates.map((coord: [number, number]) => [coord[1], coord[0]] as [number, number])
+      const bounds = L.latLngBounds(latLngs)
+      map.fitBounds(bounds, { padding: [50, 50] })
+    }
+  }, [routeGeometry, map])
+  return null
+}
+
+const resourceMarkerIcon = L.divIcon({
+  className: 'resource-map-marker-icon',
+  html: `
+    <div style="
+      background-color: #3b82f6;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 2px solid #ffffff;
+      box-shadow: 0 0 10px #3b82f680, 0 2px 5px rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    ">
+      <div style="background-color: #ffffff; width: 6px; height: 6px;"></div>
+    </div>
+  `,
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+  popupAnchor: [0, -10],
+})
+
+export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocations }: OperationalMapProps) {
   const [mapState, setMapState] = useState<'loading' | 'connected' | 'failed'>('loading')
   const [mapData, setMapData] = useState<MapNeedsResponse | null>(null)
   const [errorMsg, setErrorMsg] = useState<string>('')
+
+  const [routeState, setRouteState] = useState<{
+    activeRoute: any,
+    routeInfo: {distance: number, duration: number, resourceName: string} | null,
+    routeError: string,
+    resourceLocation: [number, number] | null,
+    triggerKey: number | undefined
+  }>({
+    activeRoute: null,
+    routeInfo: null,
+    routeError: '',
+    resourceLocation: null,
+    triggerKey: refreshTrigger
+  })
+
+  // Derive route validity: if refreshTrigger changes, the stored route is instantly considered invalid
+  const isRouteValid = routeState.triggerKey === refreshTrigger
+  const activeRoute = isRouteValid ? routeState.activeRoute : null
+  const routeInfo = isRouteValid ? routeState.routeInfo : null
+  const routeError = isRouteValid ? routeState.routeError : ''
+  const resourceLocation = isRouteValid ? routeState.resourceLocation : null
+
+  const [fetchingRoute, setFetchingRoute] = useState(false)
 
   useEffect(() => {
     let ignore = false
@@ -127,6 +197,70 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger }: OperationalMapPro
 
   // Filter out any items with invalid coordinates to prevent crashes
   const validItems = mapData?.items.filter(item => Number.isFinite(item.latitude) && Number.isFinite(item.longitude)) || []
+
+  const handleShowRoute = async (item: MapNeedItem) => {
+    setRouteState(prev => ({
+      ...prev,
+      activeRoute: null,
+      routeInfo: null,
+      resourceLocation: null,
+      routeError: '',
+      triggerKey: refreshTrigger
+    }))
+
+    if (!allocations || !resources) {
+      setRouteState(prev => ({ ...prev, routeError: 'Route unavailable: resource data missing' }))
+      return
+    }
+
+    const allocation = allocations.find(a => a.need_id === item.need_id)
+    if (!allocation) {
+      setRouteState(prev => ({ ...prev, routeError: 'Route unavailable: no allocation exists' }))
+      return
+    }
+
+    const resource = resources.find(r => r.id === allocation.resource_id)
+    if (!resource || typeof resource.latitude !== 'number' || typeof resource.longitude !== 'number') {
+      setRouteState(prev => ({ ...prev, routeError: 'Route unavailable: resource coordinates missing' }))
+      return
+    }
+
+    setFetchingRoute(true)
+    try {
+      const resLat = resource.latitude
+      const resLng = resource.longitude
+      const needLat = item.latitude
+      const needLng = item.longitude
+
+      const url = `https://router.project-osrm.org/route/v1/driving/${resLng},${resLat};${needLng},${needLat}?overview=full&geometries=geojson`
+
+      const response = await fetch(url)
+      if (!response.ok) throw new Error('OSRM API returned ' + response.status)
+
+      const data = await response.json()
+      if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
+        throw new Error('No route found')
+      }
+
+      const route = data.routes[0]
+      setRouteState({
+        activeRoute: route.geometry,
+        routeInfo: {
+          distance: route.distance,
+          duration: route.duration,
+          resourceName: resource.name
+        },
+        routeError: '',
+        resourceLocation: [resLat, resLng],
+        triggerKey: refreshTrigger
+      })
+
+    } catch (err) {
+      setRouteState(prev => ({ ...prev, routeError: 'Route unavailable: ' + (err instanceof Error ? err.message : String(err)) }))
+    } finally {
+      setFetchingRoute(false)
+    }
+  }
 
   return (
     <div style={{
@@ -199,7 +333,25 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger }: OperationalMapPro
               />
 
               <MapResizer />
-              {validItems.length > 0 && <AutoCenterMap items={validItems} />}
+              {validItems.length > 0 && !activeRoute && <AutoCenterMap items={validItems} />}
+              {activeRoute && <AutoFitRoute routeGeometry={activeRoute} />}
+
+              {activeRoute && (
+                <GeoJSON
+                  key={JSON.stringify(activeRoute)}
+                  data={activeRoute}
+                  style={{ color: '#3b82f6', weight: 4, opacity: 0.8 }}
+                />
+              )}
+
+              {resourceLocation && (
+                <Marker position={resourceLocation} icon={resourceMarkerIcon}>
+                  <Popup>
+                    <strong>Resource Origin</strong>
+                    {routeInfo && <div>{routeInfo.resourceName}</div>}
+                  </Popup>
+                </Marker>
+              )}
 
               {validItems.map((item) => {
                 const markerIcon = createCustomMarkerIcon(item.uncovered_quantity, item.allocated_quantity)
@@ -217,11 +369,11 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger }: OperationalMapPro
                         <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.5rem' }}>
                           Source Report #{item.report_id} &bull; {item.category.toUpperCase()}
                         </div>
-                        
+
                         <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 0.75rem', fontSize: '0.825rem' }}>
                           <span style={{ color: '#64748b' }}>Location:</span>
                           <strong>{item.location}</strong>
-                          
+
                           <span style={{ color: '#64748b' }}>People Affected:</span>
                           <strong>{item.people_affected}</strong>
 
@@ -238,6 +390,33 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger }: OperationalMapPro
 
                           <span style={{ color: '#64748b' }}>Coverage %:</span>
                           <strong>{item.coverage_percent}%</strong>
+                        </div>
+
+                        <div style={{ marginTop: '0.75rem', borderTop: '1px solid #e2e8f0', paddingTop: '0.5rem' }}>
+                          <button
+                            className="btn-action confirm"
+                            style={{ width: '100%', fontSize: '0.8rem', padding: '0.25rem', height: 'auto' }}
+                            onClick={() => handleShowRoute(item)}
+                            disabled={fetchingRoute}
+                          >
+                            {fetchingRoute ? 'Calculating...' : 'Show Suggested Route'}
+                          </button>
+                          {routeError && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{routeError}</div>}
+                          {routeInfo && activeRoute && (
+                            <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', backgroundColor: '#f1f5f9', padding: '0.5rem', borderRadius: '4px' }}>
+                              <div style={{ fontWeight: 600, color: '#2563eb', marginBottom: '0.25rem' }}>Suggested Route</div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.15rem 0.5rem' }}>
+                                <span style={{ color: '#64748b' }}>Resource:</span>
+                                <strong>{routeInfo.resourceName}</strong>
+                                <span style={{ color: '#64748b' }}>Destination:</span>
+                                <strong>Verified Need #{item.need_id}</strong>
+                                <span style={{ color: '#64748b' }}>Est. Distance:</span>
+                                <strong>{(routeInfo.distance / 1000).toFixed(1)} km</strong>
+                                <span style={{ color: '#64748b' }}>Est. Duration:</span>
+                                <strong>{Math.ceil(routeInfo.duration / 60)} min</strong>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </Popup>
