@@ -112,6 +112,43 @@ function AutoFitRoute({ routeGeometry }: { routeGeometry: any }) {
   return null
 }
 
+function calculateHaversineDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371e3; // metres
+  const phi1 = lat1 * Math.PI/180;
+  const phi2 = lat2 * Math.PI/180;
+  const dPhi = (lat2-lat1) * Math.PI/180;
+  const dLambda = (lon2-lon1) * Math.PI/180;
+
+  const a = Math.sin(dPhi/2) * Math.sin(dPhi/2) +
+            Math.cos(phi1) * Math.cos(phi2) *
+            Math.sin(dLambda/2) * Math.sin(dLambda/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+  return R * c; // in metres
+}
+
+const landmarkMarkerIcon = L.divIcon({
+  className: 'landmark-map-marker-icon',
+  html: `
+    <div style="
+      background-color: #8b5cf6;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 2px solid #ffffff;
+      box-shadow: 0 0 10px #8b5cf680, 0 2px 5px rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    ">
+      <div style="background-color: #ffffff; width: 6px; height: 6px; border-radius: 50%;"></div>
+    </div>
+  `,
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+  popupAnchor: [0, -10],
+})
+
 const resourceMarkerIcon = L.divIcon({
   className: 'resource-map-marker-icon',
   html: `
@@ -141,16 +178,20 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
 
   const [routeState, setRouteState] = useState<{
     activeRoute: any,
-    routeInfo: {distance: number, duration: number, resourceName: string} | null,
+    routeInfo: {distance: number, duration: number, resourceName: string, isLandmark?: boolean} | null,
     routeError: string,
     resourceLocation: [number, number] | null,
-    triggerKey: number | undefined
+    triggerKey: number | undefined,
+    landmarkData: { name: string, type: string, lat: number, lon: number, distance: number } | null,
+    landmarkError: string
   }>({
     activeRoute: null,
     routeInfo: null,
     routeError: '',
     resourceLocation: null,
-    triggerKey: refreshTrigger
+    triggerKey: refreshTrigger,
+    landmarkData: null,
+    landmarkError: ''
   })
 
   // Derive route validity: if refreshTrigger changes, the stored route is instantly considered invalid
@@ -159,8 +200,11 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
   const routeInfo = isRouteValid ? routeState.routeInfo : null
   const routeError = isRouteValid ? routeState.routeError : ''
   const resourceLocation = isRouteValid ? routeState.resourceLocation : null
+  const landmarkData = isRouteValid ? routeState.landmarkData : null
+  const landmarkError = isRouteValid ? routeState.landmarkError : ''
 
   const [fetchingRoute, setFetchingRoute] = useState(false)
+  const [fetchingLandmark, setFetchingLandmark] = useState(false)
 
   useEffect(() => {
     let ignore = false
@@ -252,13 +296,128 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
         },
         routeError: '',
         resourceLocation: [resLat, resLng],
-        triggerKey: refreshTrigger
+        triggerKey: refreshTrigger,
+        landmarkData: null,
+        landmarkError: ''
       })
 
     } catch (err) {
       setRouteState(prev => ({ ...prev, routeError: 'Route unavailable: ' + (err instanceof Error ? err.message : String(err)) }))
     } finally {
       setFetchingRoute(false)
+    }
+  }
+
+  const handleFindLandmark = async (item: MapNeedItem) => {
+    setRouteState(prev => ({
+      ...prev,
+      activeRoute: null,
+      routeInfo: null,
+      resourceLocation: null,
+      routeError: '',
+      landmarkData: null,
+      landmarkError: '',
+      triggerKey: refreshTrigger
+    }))
+
+    setFetchingLandmark(true)
+    try {
+      const needLat = item.latitude
+      const needLng = item.longitude
+
+      const query = `
+        [out:json];
+        (
+          nwr["amenity"~"hospital|police|fire_station|community_centre|school|college"](around:3000,${needLat},${needLng});
+          nwr["office"="government"](around:3000,${needLat},${needLng});
+        );
+        out center;
+      `
+
+      const response = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        body: query
+      })
+
+      if (!response.ok) throw new Error('Overpass API returned ' + response.status)
+      const data = await response.json()
+
+      if (!data.elements || data.elements.length === 0) {
+        setRouteState(prev => ({ ...prev, landmarkError: 'No nearby reference landmark found.', triggerKey: refreshTrigger }))
+        return
+      }
+
+      let nearestDist = Infinity
+      let nearestElem: any = null
+      let nearestLat = 0
+      let nearestLng = 0
+
+      data.elements.forEach((el: any) => {
+        const lat = el.lat || el.center?.lat
+        const lon = el.lon || el.center?.lon
+        if (lat && lon) {
+          const dist = calculateHaversineDistance(needLat, needLng, lat, lon)
+          if (dist < nearestDist) {
+            nearestDist = dist
+            nearestElem = el
+            nearestLat = lat
+            nearestLng = lon
+          }
+        }
+      })
+
+      if (!nearestElem) {
+        setRouteState(prev => ({ ...prev, landmarkError: 'No nearby reference landmark found.', triggerKey: refreshTrigger }))
+        return
+      }
+
+      const type = nearestElem.tags?.amenity || nearestElem.tags?.office || 'Landmark'
+      const name = nearestElem.tags?.name || 'Unnamed ' + type
+
+      let routeGeo = null
+      let routeDistance = 0
+      let routeDuration = 0
+      let routeErrStr = ''
+
+      try {
+        const url = `https://router.project-osrm.org/route/v1/driving/${nearestLng},${nearestLat};${needLng},${needLat}?overview=full&geometries=geojson`
+        const osrmRes = await fetch(url)
+        if (osrmRes.ok) {
+          const osrmData = await osrmRes.json()
+          if (osrmData.code === 'Ok' && osrmData.routes && osrmData.routes.length > 0) {
+            const route = osrmData.routes[0]
+            routeGeo = route.geometry
+            routeDistance = route.distance
+            routeDuration = route.duration
+          } else {
+             routeErrStr = 'Reference route unavailable.'
+          }
+        } else {
+           routeErrStr = 'Reference route unavailable.'
+        }
+      } catch {
+        routeErrStr = 'Reference route unavailable.'
+      }
+
+      setRouteState({
+        activeRoute: routeGeo,
+        routeInfo: routeGeo ? {
+          distance: routeDistance,
+          duration: routeDuration,
+          resourceName: name,
+          isLandmark: true
+        } : null,
+        routeError: routeErrStr,
+        resourceLocation: null,
+        landmarkData: { name, type, lat: nearestLat, lon: nearestLng, distance: nearestDist },
+        landmarkError: '',
+        triggerKey: refreshTrigger
+      })
+
+    } catch {
+      setRouteState(prev => ({ ...prev, landmarkError: 'Nearby landmark service unavailable.', triggerKey: refreshTrigger }))
+    } finally {
+      setFetchingLandmark(false)
     }
   }
 
@@ -353,6 +512,17 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
                 </Marker>
               )}
 
+              {landmarkData && (
+                <Marker position={[landmarkData.lat, landmarkData.lon]} icon={landmarkMarkerIcon}>
+                  <Popup>
+                    <strong>Potential Staging Point</strong>
+                    <div>{landmarkData.name}</div>
+                    <div style={{ textTransform: 'capitalize', color: '#64748b' }}>{landmarkData.type.replace('_', ' ')}</div>
+                    <div style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#f59e0b' }}>Map reference only — verify local safety conditions.</div>
+                  </Popup>
+                </Marker>
+              )}
+
               {validItems.map((item) => {
                 const markerIcon = createCustomMarkerIcon(item.uncovered_quantity, item.allocated_quantity)
                 return (
@@ -393,29 +563,74 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
                         </div>
 
                         <div style={{ marginTop: '0.75rem', borderTop: '1px solid #e2e8f0', paddingTop: '0.5rem' }}>
-                          <button
-                            className="btn-action confirm"
-                            style={{ width: '100%', fontSize: '0.8rem', padding: '0.25rem', height: 'auto' }}
-                            onClick={() => handleShowRoute(item)}
-                            disabled={fetchingRoute}
-                          >
-                            {fetchingRoute ? 'Calculating...' : 'Show Suggested Route'}
-                          </button>
-                          {routeError && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{routeError}</div>}
-                          {routeInfo && activeRoute && (
-                            <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', backgroundColor: '#f1f5f9', padding: '0.5rem', borderRadius: '4px' }}>
-                              <div style={{ fontWeight: 600, color: '#2563eb', marginBottom: '0.25rem' }}>Suggested Route</div>
-                              <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.15rem 0.5rem' }}>
-                                <span style={{ color: '#64748b' }}>Resource:</span>
-                                <strong>{routeInfo.resourceName}</strong>
-                                <span style={{ color: '#64748b' }}>Destination:</span>
-                                <strong>Verified Need #{item.need_id}</strong>
-                                <span style={{ color: '#64748b' }}>Est. Distance:</span>
-                                <strong>{(routeInfo.distance / 1000).toFixed(1)} km</strong>
-                                <span style={{ color: '#64748b' }}>Est. Duration:</span>
-                                <strong>{Math.ceil(routeInfo.duration / 60)} min</strong>
-                              </div>
-                            </div>
+                          {item.allocated_quantity > 0 ? (
+                            <>
+                              <button
+                                className="btn-action confirm"
+                                style={{ width: '100%', fontSize: '0.8rem', padding: '0.25rem', height: 'auto' }}
+                                onClick={() => handleShowRoute(item)}
+                                disabled={fetchingRoute}
+                              >
+                                {fetchingRoute ? 'Calculating...' : 'Show Suggested Route'}
+                              </button>
+                              {routeError && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{routeError}</div>}
+                              {routeInfo && activeRoute && !routeInfo.isLandmark && (
+                                <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', backgroundColor: '#f1f5f9', padding: '0.5rem', borderRadius: '4px' }}>
+                                  <div style={{ fontWeight: 600, color: '#2563eb', marginBottom: '0.25rem' }}>Suggested Route</div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.15rem 0.5rem' }}>
+                                    <span style={{ color: '#64748b' }}>Resource:</span>
+                                    <strong>{routeInfo.resourceName}</strong>
+                                    <span style={{ color: '#64748b' }}>Destination:</span>
+                                    <strong>Verified Need #{item.need_id}</strong>
+                                    <span style={{ color: '#64748b' }}>Est. Distance:</span>
+                                    <strong>{(routeInfo.distance / 1000).toFixed(1)} km</strong>
+                                    <span style={{ color: '#64748b' }}>Est. Duration:</span>
+                                    <strong>{Math.ceil(routeInfo.duration / 60)} min</strong>
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                className="btn-action"
+                                style={{ width: '100%', fontSize: '0.8rem', padding: '0.25rem', height: 'auto', backgroundColor: '#8b5cf6', color: 'white', border: 'none' }}
+                                onClick={() => handleFindLandmark(item)}
+                                disabled={fetchingLandmark}
+                              >
+                                {fetchingLandmark ? 'Searching...' : 'Find Nearby Landmark'}
+                              </button>
+                              {landmarkError && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{landmarkError}</div>}
+                              {routeError && <div style={{ color: '#dc2626', fontSize: '0.75rem', marginTop: '0.25rem' }}>{routeError}</div>}
+                              {landmarkData && (
+                                <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', backgroundColor: '#faf5ff', border: '1px solid #e9d5ff', padding: '0.5rem', borderRadius: '4px' }}>
+                                  <div style={{ fontWeight: 600, color: '#7e22ce', marginBottom: '0.25rem' }}>Nearest Reference Landmark</div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.15rem 0.5rem' }}>
+                                    <span style={{ color: '#64748b' }}>Name:</span>
+                                    <strong>{landmarkData.name}</strong>
+                                    <span style={{ color: '#64748b' }}>Type:</span>
+                                    <strong style={{ textTransform: 'capitalize' }}>{landmarkData.type.replace('_', ' ')}</strong>
+                                    <span style={{ color: '#64748b' }}>Approx. Dist:</span>
+                                    <strong>{(landmarkData.distance / 1000).toFixed(1)} km</strong>
+                                  </div>
+                                  <div style={{ fontSize: '0.75rem', marginTop: '0.5rem', color: '#b45309', fontWeight: 500, lineHeight: '1.2' }}>
+                                    Status: Reference point only — verify local safety conditions.
+                                  </div>
+
+                                  {routeInfo && activeRoute && routeInfo.isLandmark && (
+                                    <div style={{ marginTop: '0.75rem', borderTop: '1px solid #e9d5ff', paddingTop: '0.5rem' }}>
+                                      <div style={{ fontWeight: 600, color: '#7e22ce', marginBottom: '0.25rem' }}>Reference Route from Nearby Landmark</div>
+                                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.15rem 0.5rem' }}>
+                                        <span style={{ color: '#64748b' }}>Estimated Distance:</span>
+                                        <strong>{(routeInfo.distance / 1000).toFixed(1)} km</strong>
+                                        <span style={{ color: '#64748b' }}>Estimated Duration:</span>
+                                        <strong>{Math.ceil(routeInfo.duration / 60)} min</strong>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
                       </div>
