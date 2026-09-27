@@ -213,7 +213,7 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
       setMapState('loading')
       setErrorMsg('')
       try {
-        const res = await fetch(`${apiBaseUrl}/map/needs`)
+        const res = await fetch(`${apiBaseUrl}/map/needs?t=${refreshTrigger}`)
         if (!res.ok) {
           throw new Error(`Map API returned status ${res.status}`)
         }
@@ -239,8 +239,8 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
 
   const defaultCenter: [number, number] = [12.9716, 77.5946] // Bangalore default coordinates
 
-  // Filter out any items with invalid coordinates to prevent crashes
-  const validItems = mapData?.items.filter(item => Number.isFinite(item.latitude) && Number.isFinite(item.longitude)) || []
+  // Filter out any items with invalid coordinates to prevent crashes and only show active needs
+  const validItems = mapData?.items.filter(item => Number.isFinite(item.latitude) && Number.isFinite(item.longitude) && item.uncovered_quantity > 0) || []
 
   const handleShowRoute = async (item: MapNeedItem) => {
     setRouteState(prev => ({
@@ -444,7 +444,10 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
           <span style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--text-main)' }}>Operational Map</span>
           <span className="status-badge connected">
             <span className="status-dot"></span>
-            Verified Needs Only
+            Active Verified Needs Only
+          </span>
+          <span style={{ fontSize: '0.75rem', color: '#64748b', fontStyle: 'italic', marginLeft: '0.5rem' }}>
+            Completed needs are hidden from the active operational map.
           </span>
         </div>
         {mapState === 'connected' && mapData && (
