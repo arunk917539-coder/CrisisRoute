@@ -161,9 +161,7 @@ export const RequestHelpPage: React.FC = () => {
       latitude: draft.latitude,
       longitude: draft.longitude,
       people_affected: draft.people_affected,
-      required_quantity: draft.required_quantity,
-      latitude: draft.latitude,
-      longitude: draft.longitude
+      required_quantity: draft.required_quantity
     };
 
     const result = await createPublicReport(payload);
