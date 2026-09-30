@@ -80,8 +80,8 @@ def create_stale_state():
 
 def expected_snapshot():
     return {
-        "reports": 2,
-        "relationships": 1,
+        "reports": 4,
+        "relationships": 2,
         "needs": 0,
         "deliveries": 0,
         "audits": 1,

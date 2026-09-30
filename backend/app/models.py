@@ -14,12 +14,16 @@ class Report(Base):
     longitude = Column(Float, nullable=True)
     people_affected = Column(Integer, nullable=False, default=0)
     required_quantity = Column(Float, nullable=False, default=0)
+    priority = Column(String, nullable=False, default="medium")
     timestamp = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, nullable=True)
     evidence_status = Column(String, nullable=False, default="none")
     evidence_source = Column(String, nullable=False, default="unspecified")
     evidence_note = Column(String, nullable=False, default="")
     evidence_observed_at = Column(DateTime, nullable=True)
     verification_status = Column(String, nullable=False, default="unverified")
+    reviewed_at = Column(DateTime, nullable=True)
+    review_note = Column(String, nullable=False, default="")
     is_synthetic = Column(Boolean, nullable=False, default=True)
 
 class Relationship(Base):

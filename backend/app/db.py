@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -7,8 +8,11 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 # demo-reset scripts always operate on the same database regardless of the
 # current working directory.
 DATABASE_PATH = Path(__file__).resolve().parents[1] / "crisisroute.db"
-DATABASE_URL = f"sqlite:///{DATABASE_PATH.as_posix()}"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+DATABASE_URL = os.environ.get("CRISISROUTE_DATABASE_URL", f"sqlite:///{DATABASE_PATH.as_posix()}")
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False, "timeout": 30} if DATABASE_URL.startswith("sqlite") else {},
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 
@@ -23,7 +27,7 @@ def get_db():
 
 
 def ensure_schema():
-    """Create tables and add the M2.11 report provenance column for existing SQLite demos."""
+    """Create tables and preserve existing SQLite data during additive migrations."""
     from sqlalchemy import inspect, text
     Base.metadata.create_all(bind=engine)
     inspector = inspect(engine)
@@ -35,6 +39,14 @@ def ensure_schema():
             conn.execute(text("ALTER TABLE reports ADD COLUMN latitude FLOAT"))
         if "longitude" not in report_columns:
             conn.execute(text("ALTER TABLE reports ADD COLUMN longitude FLOAT"))
+        if "priority" not in report_columns:
+            conn.execute(text("ALTER TABLE reports ADD COLUMN priority VARCHAR NOT NULL DEFAULT 'medium'"))
+        if "reviewed_at" not in report_columns:
+            conn.execute(text("ALTER TABLE reports ADD COLUMN reviewed_at DATETIME"))
+        if "review_note" not in report_columns:
+            conn.execute(text("ALTER TABLE reports ADD COLUMN review_note VARCHAR NOT NULL DEFAULT ''"))
+        if "updated_at" not in report_columns:
+            conn.execute(text("ALTER TABLE reports ADD COLUMN updated_at DATETIME"))
 
         need_columns = {c["name"] for c in inspector.get_columns("needs")}
         if "unit" not in need_columns:

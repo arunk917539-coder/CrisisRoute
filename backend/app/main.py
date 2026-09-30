@@ -1,7 +1,11 @@
 from datetime import datetime, timezone
+from decimal import Decimal
+import os
 
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from .db import Base, engine, get_db, ensure_schema
@@ -22,26 +26,37 @@ from .schemas import (
     PublicReportCreate,
     ResourceCreate,
     AllocationCreate,
+    ReportReview,
 )
-from .reconcile import suggest_relationship, lexical_semantic_similarity
+from .reconcile import suggest_relationship, normalized_category
 
 
 ensure_schema()
 
 app = FastAPI(title="CrisisRoute API")
 
+CORS_ORIGINS = [origin.strip().rstrip("/") for origin in os.environ.get(
+    "CRISISROUTE_CORS_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174",
+).split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ],
-    allow_credentials=True,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request, exc):
+    # Invalid NaN/Infinity input must produce a serializable 422, not a 500
+    # while FastAPI attempts to echo the non-finite input in its error body.
+    return JSONResponse(status_code=422, content={"detail": [
+        {"loc": list(error["loc"]), "msg": error["msg"], "type": error["type"]}
+        for error in exc.errors()
+    ]})
 
 
 def audit(
@@ -62,7 +77,93 @@ def audit(
 
 
 def iso(dt):
-    return dt.isoformat() if dt else None
+    if dt is None:
+        return None
+    return (dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt).astimezone(timezone.utc).isoformat()
+
+
+def evidence_was_reviewed(db: Session, report_id: int) -> bool:
+    return db.query(AuditEvent).filter_by(
+        event_type="evidence_reviewed", entity_type="report", entity_id=report_id,
+    ).first() is not None
+
+
+def touch_report(report: Report):
+    report.updated_at = datetime.now(timezone.utc)
+
+
+def quantity_sum(values):
+    return float(sum((Decimal(str(value)) for value in values), Decimal(0)))
+
+
+def quantity_remaining(required, covered):
+    return max(float(Decimal(str(required)) - Decimal(str(covered))), 0.0)
+
+
+def confirmed_duplicate_report_ids(db: Session, report_id: int):
+    links = db.query(Relationship).filter_by(
+        relationship_type="possible_duplicate", decision="accept",
+    ).all()
+    connected = {report_id}
+    while True:
+        previous = len(connected)
+        for link in links:
+            if link.report_a_id in connected or link.report_b_id in connected:
+                connected.update((link.report_a_id, link.report_b_id))
+        if len(connected) == previous:
+            return connected
+
+
+def need_coverage(db: Session, need: Need):
+    deliveries = db.query(Delivery).filter_by(need_id=need.id).all()
+    delivered = quantity_sum(item.delivered_quantity for item in deliveries)
+    allocations = db.query(Allocation).filter_by(need_id=need.id).all()
+    allocated = quantity_sum(item.allocated_quantity for item in allocations)
+    # Completed allocation quantities are already included in deliveries. Only
+    # their outstanding portions reserve any of the still-uncovered need.
+    outstanding = quantity_sum(quantity_remaining(item.allocated_quantity, quantity_sum(
+        delivery.delivered_quantity for delivery in deliveries if delivery.allocation_id == item.id
+    )) for item in allocations)
+    uncovered = quantity_remaining(need.verified_quantity, delivered)
+    return {
+        "need_id": need.id,
+        "report_id": need.report_id,
+        "verified_quantity": need.verified_quantity,
+        "unit": need.unit,
+        "allocated_quantity": allocated,
+        "outstanding_allocated_quantity": outstanding,
+        "remaining_to_allocate": quantity_remaining(uncovered, outstanding),
+        "delivered_quantity": delivered,
+        "uncovered_quantity": uncovered,
+        "coverage_percent": round(delivered / need.verified_quantity * 100, 1) if need.verified_quantity else 0,
+        "coverage_status": "covered" if uncovered == 0 else "partial" if delivered else "uncovered",
+    }
+
+
+def report_response(db: Session, report: Report):
+    return {
+        "id": report.id,
+        "report_type": report.report_type,
+        "category": report.category,
+        "description": report.description,
+        "location": report.location,
+        "latitude": report.latitude,
+        "longitude": report.longitude,
+        "people_affected": report.people_affected,
+        "required_quantity": report.required_quantity,
+        "priority": report.priority,
+        "timestamp": iso(report.timestamp),
+        "updated_at": iso(report.updated_at or report.timestamp),
+        "evidence_status": report.evidence_status,
+        "evidence_source": report.evidence_source,
+        "evidence_note": report.evidence_note,
+        "evidence_observed_at": iso(report.evidence_observed_at),
+        "evidence_reviewed": evidence_was_reviewed(db, report.id),
+        "verification_status": report.verification_status,
+        "reviewed_at": iso(report.reviewed_at),
+        "review_note": report.review_note,
+        "is_synthetic": report.is_synthetic,
+    }
 
 
 def public_request_id(report_id: int) -> str:
@@ -75,7 +176,7 @@ def parse_public_request_id(request_id: str) -> int:
 
     raw_id = request_id[3:]
 
-    if not raw_id.isdigit() or int(raw_id) <= 0:
+    if not raw_id.isascii() or not raw_id.isdigit() or len(raw_id) > 19 or not 0 < int(raw_id) <= 9223372036854775807:
         raise HTTPException(400, "Invalid request ID")
 
     return int(raw_id)
@@ -97,10 +198,13 @@ def public_request_status(
         .first()
     )
 
-    if not need:
-        return "under_review"
+    if report.verification_status in ("rejected", "unresolved"):
+        return report.verification_status
 
-    delivered = sum(
+    if not need:
+        return "verified" if report.verification_status == "verified" else "under_review"
+
+    delivered = quantity_sum(
         x.delivered_quantity
         for x in db.query(Delivery)
         .filter(Delivery.need_id == need.id)
@@ -130,9 +234,12 @@ def public_request_response(
     db: Session,
     report: Report,
 ):
+    need = db.query(Need).filter_by(report_id=report.id).first()
     return {
         "request_id": public_request_id(report.id),
         "status": public_request_status(db, report),
+        "report_type": report.report_type,
+        "priority": report.priority,
         "category": report.category,
         "description": report.description,
         "location": report.location,
@@ -141,12 +248,16 @@ def public_request_response(
         "people_affected": report.people_affected,
         "required_quantity": report.required_quantity,
         "submitted_at": iso(report.timestamp),
+        "reviewed_at": iso(report.reviewed_at),
+        "review_note": report.review_note,
+        "updated_at": iso(report.updated_at or report.timestamp),
+        "coverage": need_coverage(db, need) if need else None,
     }
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "demo_data": "synthetic"}
+    return {"status": "ok", "reconciliation": "offline lexical advisory", "human_review_required": True}
 
 
 # ---------------------------------------------------------------------------
@@ -186,9 +297,10 @@ def create_public_report(
         longitude=payload.longitude,
         people_affected=payload.people_affected,
         required_quantity=payload.required_quantity,
-        evidence_status="none",
+        priority=payload.priority,
+        evidence_status="other" if payload.evidence_note else "none",
         evidence_source="citizen submission",
-        evidence_note="",
+        evidence_note=payload.evidence_note,
         evidence_observed_at=None,
         verification_status="unverified",
         is_synthetic=False,
@@ -344,27 +456,15 @@ def get_public_requests(
 
 @app.get("/reports")
 def reports(db: Session = Depends(get_db)):
-    return [
-        {
-            "id": r.id,
-            "report_type": r.report_type,
-            "category": r.category,
-            "description": r.description,
-            "location": r.location,
-            "latitude": r.latitude,
-            "longitude": r.longitude,
-            "people_affected": r.people_affected,
-            "required_quantity": r.required_quantity,
-            "timestamp": iso(r.timestamp),
-            "evidence_status": r.evidence_status,
-            "evidence_source": r.evidence_source,
-            "evidence_note": r.evidence_note,
-            "evidence_observed_at": iso(r.evidence_observed_at),
-            "verification_status": r.verification_status,
-            "is_synthetic": r.is_synthetic,
-        }
-        for r in db.query(Report).all()
-    ]
+    return [report_response(db, r) for r in db.query(Report).order_by(Report.id.desc()).all()]
+
+
+@app.get("/reports/{report_id}")
+def get_report(report_id: int, db: Session = Depends(get_db)):
+    report = db.get(Report, report_id)
+    if not report:
+        raise HTTPException(404, "Report not found")
+    return report_response(db, report)
 
 
 @app.post("/reports")
@@ -402,12 +502,15 @@ def create_report(
         category=category,
         description=description,
         location=location,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
         people_affected=payload.people_affected,
         required_quantity=payload.required_quantity,
+        priority=payload.priority,
         evidence_status=payload.evidence_status,
         evidence_source=source,
         evidence_note=note,
-        evidence_observed_at=None,
+        evidence_observed_at=payload.evidence_observed_at,
         verification_status="unverified",
         is_synthetic=True,
     )
@@ -464,22 +567,7 @@ def create_report(
     db.commit()
     db.refresh(r)
 
-    return {
-        "id": r.id,
-        "report_type": r.report_type,
-        "category": r.category,
-        "description": r.description,
-        "location": r.location,
-        "people_affected": r.people_affected,
-        "required_quantity": r.required_quantity,
-        "timestamp": iso(r.timestamp),
-        "evidence_status": r.evidence_status,
-        "evidence_source": r.evidence_source,
-        "evidence_note": r.evidence_note,
-        "evidence_observed_at": iso(r.evidence_observed_at),
-        "verification_status": r.verification_status,
-        "is_synthetic": r.is_synthetic,
-    }
+    return report_response(db, r)
 
 
 @app.get("/reports/{report_id}/evidence")
@@ -530,7 +618,8 @@ def report_evidence(
             else None
         ),
         "freshness": freshness,
-        "human_review_required": True,
+        "reviewed": evidence_was_reviewed(db, r.id),
+        "human_review_required": not evidence_was_reviewed(db, r.id),
     }
 
 
@@ -568,6 +657,7 @@ def review_evidence(
         r.id,
         f"Responder reviewed evidence context for report #{r.id}",
     )
+    touch_report(r)
 
     db.commit()
 
@@ -652,7 +742,8 @@ def reconciliation_queue(db: Session = Depends(get_db)):
                 "note": r.evidence_note,
                 "observed_at": iso(r.evidence_observed_at),
                 "freshness": freshness,
-                "human_review_required": True,
+                "reviewed": evidence_was_reviewed(db, r.id),
+                "human_review_required": not evidence_was_reviewed(db, r.id),
             }
 
         result.append(
@@ -675,7 +766,10 @@ def reconciliation_queue(db: Session = Depends(get_db)):
                     "people_affected": a.people_affected,
                     "required_quantity": a.required_quantity,
                     "timestamp": iso(a.timestamp),
-                    "verification_status": a.verification_status,
+                "verification_status": a.verification_status,
+                    "priority": a.priority,
+                    "latitude": a.latitude,
+                    "longitude": a.longitude,
                     "evidence": evidence(a),
                 },
                 "report_b": {
@@ -687,7 +781,10 @@ def reconciliation_queue(db: Session = Depends(get_db)):
                     "people_affected": b.people_affected,
                     "required_quantity": b.required_quantity,
                     "timestamp": iso(b.timestamp),
-                    "verification_status": b.verification_status,
+                "verification_status": b.verification_status,
+                    "priority": b.priority,
+                    "latitude": b.latitude,
+                    "longitude": b.longitude,
                     "evidence": evidence(b),
                 },
             }
@@ -709,6 +806,11 @@ def relationship_decision(
 
     if not x:
         raise HTTPException(404, "Relationship not found")
+
+    if payload.decision == "accept" and x.relationship_type == "possible_duplicate":
+        report_ids = confirmed_duplicate_report_ids(db, x.report_a_id) | confirmed_duplicate_report_ids(db, x.report_b_id)
+        if db.query(Need).filter(Need.report_id.in_(report_ids)).count() > 1:
+            raise HTTPException(409, "Both duplicate report groups already contain verified needs; accepting would double-count the same need")
 
     x.decision = payload.decision
 
@@ -732,79 +834,84 @@ def relationship_decision(
 # VERIFICATION / NEEDS
 # ---------------------------------------------------------------------------
 
-@app.post("/needs")
-def create_need(
-    payload: NeedCreate,
-    db: Session = Depends(get_db),
-):
-    r = db.get(Report, payload.report_id)
+def verify_relief_need(db: Session, report: Report, quantity: float, unit: str):
+    if report.report_type != "relief":
+        raise HTTPException(400, "Only relief reports can become needs")
+    if not evidence_was_reviewed(db, report.id):
+        raise HTTPException(409, "Evidence must be explicitly reviewed before verification")
+    if quantity > report.required_quantity:
+        raise HTTPException(400, "Verified quantity cannot exceed requested quantity")
+    if db.query(Need).filter_by(report_id=report.id).first():
+        raise HTTPException(409, "Verified need already exists")
 
-    if not r:
-        raise HTTPException(404, "Report not found")
+    # An accepted duplicate is a human decision. Do not count a second
+    # operational need when that same confirmed need is already represented.
+    duplicate_need = db.query(Need).filter(
+        Need.report_id.in_(confirmed_duplicate_report_ids(db, report.id)),
+    ).first()
+    if duplicate_need:
+        raise HTTPException(409, f"Accepted duplicate report #{duplicate_need.report_id} already has a verified need; reconcile the relationship before creating another")
 
-    if r.report_type != "relief":
-        raise HTTPException(
-            400,
-            "Only relief reports can become needs",
-        )
-
-    evidence_reviewed = (
-        db.query(AuditEvent)
-        .filter(
-            AuditEvent.event_type == "evidence_reviewed",
-            AuditEvent.entity_type == "report",
-            AuditEvent.entity_id == r.id,
-        )
-        .first()
-        is not None
-    )
-
-    if not evidence_reviewed:
-        raise HTTPException(
-            409,
-            "Evidence must be explicitly reviewed before verification",
-        )
-
-    if payload.verified_quantity > r.required_quantity:
-        raise HTTPException(
-            400,
-            "Verified quantity cannot exceed requested quantity",
-        )
-
-    if db.query(Need).filter_by(report_id=r.id).first():
-        raise HTTPException(
-            409,
-            "Verified need already exists",
-        )
-
-    n = Need(
-        report_id=r.id,
-        verified_quantity=payload.verified_quantity,
-        unit=payload.unit.strip(),
-    )
-
-    r.verification_status = "verified"
-
-    db.add(n)
+    need = Need(report_id=report.id, verified_quantity=quantity, unit=unit.strip())
+    report.verification_status = "verified"
+    report.reviewed_at = datetime.now(timezone.utc)
+    touch_report(report)
+    db.add(need)
     db.flush()
+    audit(db, "need_verified", "need", need.id,
+          f"Responder verified {need.verified_quantity:g} {need.unit} for report #{report.id}")
+    return need
 
-    audit(
-        db,
-        "need_verified",
-        "need",
-        n.id,
-        f"Responder verified {n.verified_quantity:g} units for report #{r.id}",
-    )
 
+@app.post("/needs")
+def create_need(payload: NeedCreate, db: Session = Depends(get_db)):
+    report = db.get(Report, payload.report_id)
+    if not report:
+        raise HTTPException(404, "Report not found")
+    need = verify_relief_need(db, report, payload.verified_quantity, payload.unit)
     db.commit()
-    db.refresh(n)
-
+    db.refresh(need)
     return {
-        "id": n.id,
-        "report_id": n.report_id,
-        "verified_quantity": n.verified_quantity,
-        "unit": n.unit,
-        "status": n.status,
+        "id": need.id, "report_id": need.report_id,
+        "verified_quantity": need.verified_quantity, "unit": need.unit, "status": need.status,
+    }
+
+
+@app.post("/reports/{report_id}/review")
+def review_report(report_id: int, payload: ReportReview, db: Session = Depends(get_db)):
+    report = db.get(Report, report_id)
+    if not report:
+        raise HTTPException(404, "Report not found")
+    need = db.query(Need).filter_by(report_id=report.id).first()
+    if payload.decision == "accept":
+        if not evidence_was_reviewed(db, report.id):
+            raise HTTPException(409, "Evidence must be explicitly reviewed before verification")
+        if report.report_type == "relief":
+            if payload.verified_quantity is None:
+                raise HTTPException(422, "Accepting a relief report requires verified_quantity")
+            if need is None:
+                need = verify_relief_need(db, report, payload.verified_quantity, payload.unit)
+            elif need.verified_quantity != payload.verified_quantity or need.unit.lower() != payload.unit.lower():
+                raise HTTPException(409, "An existing verified need cannot be changed through report review")
+        elif payload.verified_quantity is not None:
+            raise HTTPException(422, "Emergency verification does not create a quantity-based need")
+        report.verification_status = "verified"
+    else:
+        if need is not None:
+            raise HTTPException(409, "A report with a verified need cannot be rejected or marked unresolved")
+        if payload.verified_quantity is not None:
+            raise HTTPException(422, "Only acceptance can specify a verified quantity")
+        report.verification_status = "rejected" if payload.decision == "reject" else "unresolved"
+    report.review_note = payload.note
+    report.reviewed_at = datetime.now(timezone.utc)
+    touch_report(report)
+    audit(db, "report_reviewed", "report", report.id,
+          f"Responder marked report #{report.id} as {report.verification_status}" + (f": {payload.note}" if payload.note else ""))
+    db.commit()
+    return {
+        "report_id": report.id, "verification_status": report.verification_status,
+        "reviewed_at": iso(report.reviewed_at), "review_note": report.review_note,
+        "need_id": need.id if need else None,
     }
 
 
@@ -822,31 +929,11 @@ def map_needs(db: Session = Depends(get_db)):
         if r.latitude is None or r.longitude is None:
             continue
 
-        delivered = sum(
-            x.delivered_quantity
-            for x in db.query(Delivery)
-            .filter_by(need_id=n.id)
-            .all()
-        )
-
-        allocated = sum(
-            x.allocated_quantity
-            for x in db.query(Allocation)
-            .filter_by(need_id=n.id)
-            .all()
-        )
-
-        uncovered = max(
-            n.verified_quantity - delivered,
-            0.0,
-        )
-
-        coverage_percent = round(
-            (delivered / n.verified_quantity * 100.0)
-            if n.verified_quantity
-            else 0.0,
-            1,
-        )
+        quantities = need_coverage(db, n)
+        delivered = quantities["delivered_quantity"]
+        allocated = quantities["allocated_quantity"]
+        uncovered = quantities["uncovered_quantity"]
+        coverage_percent = quantities["coverage_percent"]
 
         if uncovered > 0:
             active_count += 1
@@ -864,6 +951,8 @@ def map_needs(db: Session = Depends(get_db)):
                 "verified_quantity": n.verified_quantity,
                 "unit": n.unit,
                 "allocated_quantity": allocated,
+                "outstanding_allocated_quantity": quantities["outstanding_allocated_quantity"],
+                "remaining_to_allocate": quantities["remaining_to_allocate"],
                 "delivered_quantity": delivered,
                 "uncovered_quantity": uncovered,
                 "coverage_percent": coverage_percent,
@@ -1017,26 +1106,12 @@ def create_allocation(
             ),
         )
 
-    delivered = sum(
-        x.delivered_quantity
-        for x in db.query(Delivery)
-        .filter_by(need_id=need.id)
-        .all()
-    )
+    report = db.get(Report, need.report_id)
+    if normalized_category(report.category) != normalized_category(resource.resource_type):
+        raise HTTPException(400, f"Resource type mismatch: need is {report.category}, resource is {resource.resource_type}")
 
-    allocated = sum(
-        x.allocated_quantity
-        for x in db.query(Allocation)
-        .filter_by(need_id=need.id)
-        .all()
-    )
-
-    uncovered = max(
-        need.verified_quantity - delivered,
-        0,
-    )
-
-    if allocated + payload.allocated_quantity > uncovered:
+    gap = need_coverage(db, need)["remaining_to_allocate"]
+    if payload.allocated_quantity > gap:
         raise HTTPException(
             400,
             "Allocation exceeds the need's remaining uncovered quantity",
@@ -1054,7 +1129,8 @@ def create_allocation(
         allocated_quantity=payload.allocated_quantity,
     )
 
-    resource.available_quantity -= payload.allocated_quantity
+    resource.available_quantity = quantity_remaining(resource.available_quantity, payload.allocated_quantity)
+    touch_report(report)
 
     db.add(allocation)
     db.flush()
@@ -1094,7 +1170,7 @@ def allocations(db: Session = Depends(get_db)):
     result = []
 
     for a in rows:
-        delivered = sum(
+        delivered = quantity_sum(
             x.delivered_quantity
             for x in db.query(Delivery)
             .filter_by(allocation_id=a.id)
@@ -1108,10 +1184,7 @@ def allocations(db: Session = Depends(get_db)):
                 "resource_id": a.resource_id,
                 "allocated_quantity": a.allocated_quantity,
                 "delivered_quantity": delivered,
-                "remaining_quantity": max(
-                    a.allocated_quantity - delivered,
-                    0,
-                ),
+                "remaining_quantity": quantity_remaining(a.allocated_quantity, delivered),
             }
         )
 
@@ -1149,7 +1222,7 @@ def create_delivery(
                 "Allocation does not belong to this need",
             )
 
-        allocation_delivered = sum(
+        allocation_delivered = quantity_sum(
             x.delivered_quantity
             for x in db.query(Delivery)
             .filter_by(allocation_id=allocation.id)
@@ -1157,7 +1230,7 @@ def create_delivery(
         )
 
         if (
-            allocation_delivered + payload.delivered_quantity
+            quantity_sum((allocation_delivered, payload.delivered_quantity))
             > allocation.allocated_quantity
         ):
             raise HTTPException(
@@ -1165,18 +1238,21 @@ def create_delivery(
                 "Delivery exceeds allocated quantity",
             )
 
-    delivered = sum(
+    delivered = quantity_sum(
         x.delivered_quantity
         for x in db.query(Delivery)
         .filter_by(need_id=n.id)
         .all()
     )
 
-    if delivered + payload.delivered_quantity > n.verified_quantity:
+    if quantity_sum((delivered, payload.delivered_quantity)) > n.verified_quantity:
         raise HTTPException(
             400,
             "Delivery exceeds verified requirement",
         )
+
+    if payload.allocation_id is None and payload.delivered_quantity > need_coverage(db, n)["remaining_to_allocate"]:
+        raise HTTPException(400, "This quantity is already reserved by an allocation; select its allocation when recording delivery")
 
     d = Delivery(
         need_id=n.id,
@@ -1185,6 +1261,7 @@ def create_delivery(
     )
 
     db.add(d)
+    touch_report(db.get(Report, n.report_id))
     db.flush()
 
     audit(
@@ -1216,66 +1293,20 @@ def create_delivery(
 
 @app.get("/coverage")
 def coverage(db: Session = Depends(get_db)):
-    rows = []
-    total_req = 0.0
-    total_del = 0.0
-
-    for n in db.query(Need).all():
-        delivered = sum(
-            x.delivered_quantity
-            for x in db.query(Delivery)
-            .filter_by(need_id=n.id)
-            .all()
-        )
-
-        allocated = sum(
-            x.allocated_quantity
-            for x in db.query(Allocation)
-            .filter_by(need_id=n.id)
-            .all()
-        )
-
-        uncovered = max(
-            n.verified_quantity - delivered,
-            0,
-        )
-
-        remaining_to_allocate = max(
-            uncovered - allocated,
-            0,
-        )
-
-        total_req += n.verified_quantity
-        total_del += delivered
-
-        rows.append(
-            {
-                "need_id": n.id,
-                "report_id": n.report_id,
-                "verified_quantity": n.verified_quantity,
-                "unit": n.unit,
-                "allocated_quantity": allocated,
-                "remaining_to_allocate": remaining_to_allocate,
-                "delivered_quantity": delivered,
-                "uncovered_quantity": uncovered,
-                "coverage_percent": round(
-                    (
-                        delivered / n.verified_quantity * 100
-                    )
-                    if n.verified_quantity
-                    else 0,
-                    1,
-                ),
-            }
-        )
-
+    rows = [need_coverage(db, need) for need in db.query(Need).order_by(Need.id).all()]
+    totals_by_unit = {}
+    for row in rows:
+        unit = row["unit"].strip().lower()
+        totals = totals_by_unit.setdefault(unit, {"verified": 0, "delivered": 0, "uncovered": 0})
+        totals["verified"] = quantity_sum((totals["verified"], row["verified_quantity"]))
+        totals["delivered"] = quantity_sum((totals["delivered"], row["delivered_quantity"]))
+        totals["uncovered"] = quantity_sum((totals["uncovered"], row["uncovered_quantity"]))
     return {
-        "total_verified": total_req,
-        "total_delivered": total_del,
-        "total_uncovered": max(
-            total_req - total_del,
-            0,
-        ),
+        "total_verified": quantity_sum(row["verified_quantity"] for row in rows),
+        "total_delivered": quantity_sum(row["delivered_quantity"] for row in rows),
+        "total_uncovered": quantity_sum(row["uncovered_quantity"] for row in rows),
+        "totals_by_unit": totals_by_unit,
+        "totals_comparable": len(totals_by_unit) <= 1,
         "needs": rows,
     }
 
@@ -1305,14 +1336,14 @@ def dashboard(db: Session = Depends(get_db)):
     uncovered_needs = 0
 
     for n in needs:
-        delivered = sum(
+        delivered = quantity_sum(
             x.delivered_quantity
             for x in db.query(Delivery)
             .filter_by(need_id=n.id)
             .all()
         )
 
-        if n.verified_quantity - delivered > 0:
+        if quantity_remaining(n.verified_quantity, delivered) > 0:
             uncovered_needs += 1
 
     return {
