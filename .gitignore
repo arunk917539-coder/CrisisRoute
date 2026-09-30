@@ -13,3 +13,6 @@ node_modules/
 dist/
 dist-ssr/
 *.local
+.demo/
+backend/*.db-wal
+backend/*.db-shm
