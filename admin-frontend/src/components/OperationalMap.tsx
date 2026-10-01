@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { apiFetch, displayTime } from '../api'
 import { MapContainer, TileLayer, Marker, Popup, useMap, GeoJSON } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
@@ -14,6 +15,7 @@ interface MapNeedItem {
   verified_quantity: number
   unit: string
   allocated_quantity: number
+  outstanding_allocated_quantity?: number
   delivered_quantity: number
   uncovered_quantity: number
   coverage_percent: number
@@ -32,8 +34,25 @@ interface ResourceMapInfo {
   longitude?: number
 }
 interface AllocationMapInfo {
+  id: number
   need_id: number
   resource_id: number
+  remaining_quantity: number
+}
+interface ReportMapInfo {
+  id: number
+  report_type: string
+  category: string
+  description: string
+  location: string
+  people_affected: number
+  required_quantity: number
+  timestamp: string
+  verification_status: string
+  latitude?: number | null
+  longitude?: number | null
+  priority?: string
+  is_synthetic?: boolean
 }
 
 interface OperationalMapProps {
@@ -41,6 +60,17 @@ interface OperationalMapProps {
   refreshTrigger?: number
   resources?: ResourceMapInfo[]
   allocations?: AllocationMapInfo[]
+  reports?: ReportMapInfo[]
+  onOpenReport?: (report: ReportMapInfo) => void
+}
+
+function validCoordinates(latitude: unknown, longitude: unknown): boolean {
+  return typeof latitude === 'number' && typeof longitude === 'number' && Number.isFinite(latitude) && Number.isFinite(longitude) && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180
+}
+function createReportMarker(priority: string) {
+  const colors: Record<string, string> = { critical: '#ef4444', high: '#f97316', medium: '#facc15', low: '#94a3b8' }
+  const color = colors[priority] ?? colors.medium
+  return L.divIcon({ className: 'incoming-report-marker', html: `<div style="width:24px;height:24px;border:4px solid ${color};background:#111827;border-radius:50%;box-shadow:0 1px 5px #0008"></div>`, iconSize: [24, 24], iconAnchor: [12, 12] })
 }
 
 // Marker icon helpers
@@ -77,14 +107,16 @@ const createCustomMarkerIcon = (uncovered: number, allocated: number) => {
 }
 
 // Auto-center map helper
-function AutoCenterMap({ items }: { items: MapNeedItem[] }) {
+function AutoCenterMap({ items, fitKey, suspended }: { items: { latitude: number; longitude: number }[]; fitKey: number; suspended: boolean }) {
   const map = useMap()
+  const centered = useRef<number | null>(null)
   useEffect(() => {
-    if (items.length > 0) {
+    if (!suspended && items.length > 0 && centered.current !== fitKey) {
+      centered.current = fitKey
       const bounds = L.latLngBounds(items.map((it) => [it.latitude, it.longitude]))
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 })
     }
-  }, [items, map])
+  }, [items, map, fitKey, suspended])
   return null
 }
 
@@ -171,17 +203,21 @@ const resourceMarkerIcon = L.divIcon({
   popupAnchor: [0, -10],
 })
 
-export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocations }: OperationalMapProps) {
+export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocations, reports = [], onOpenReport }: OperationalMapProps) {
   const [mapState, setMapState] = useState<'loading' | 'connected' | 'failed'>('loading')
   const [mapData, setMapData] = useState<MapNeedsResponse | null>(null)
   const [errorMsg, setErrorMsg] = useState<string>('')
+  const [tileUnavailable, setTileUnavailable] = useState(false)
+  const [fitKey, setFitKey] = useState(0)
+  const routeRequest = useRef(0)
 
   const [routeState, setRouteState] = useState<{
     activeRoute: any,
     routeInfo: {distance: number, duration: number, resourceName: string, isLandmark?: boolean} | null,
     routeError: string,
     resourceLocation: [number, number] | null,
-    triggerKey: number | undefined,
+    needId: number | null,
+    allocationId: number | null,
     landmarkData: { name: string, type: string, lat: number, lon: number, distance: number } | null,
     landmarkError: string
   }>({
@@ -189,19 +225,19 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
     routeInfo: null,
     routeError: '',
     resourceLocation: null,
-    triggerKey: refreshTrigger,
+    needId: null,
+    allocationId: null,
     landmarkData: null,
     landmarkError: ''
   })
 
-  // Derive route validity: if refreshTrigger changes, the stored route is instantly considered invalid
-  const isRouteValid = routeState.triggerKey === refreshTrigger
+  // Preserve routes across refreshes only while their destination and allocation are active.
+  const isRouteValid = !!mapData?.items.some(item => item.need_id === routeState.needId && item.uncovered_quantity > 0) &&
+    (routeState.allocationId === null || !!allocations?.some(allocation => allocation.id === routeState.allocationId && allocation.need_id === routeState.needId && allocation.remaining_quantity > 0))
   const activeRoute = isRouteValid ? routeState.activeRoute : null
   const routeInfo = isRouteValid ? routeState.routeInfo : null
-  const routeError = isRouteValid ? routeState.routeError : ''
   const resourceLocation = isRouteValid ? routeState.resourceLocation : null
   const landmarkData = isRouteValid ? routeState.landmarkData : null
-  const landmarkError = isRouteValid ? routeState.landmarkError : ''
 
   const [fetchingRoute, setFetchingRoute] = useState(false)
   const [fetchingLandmark, setFetchingLandmark] = useState(false)
@@ -210,10 +246,9 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
     let ignore = false
 
     async function fetchMapNeeds() {
-      setMapState('loading')
       setErrorMsg('')
       try {
-        const res = await fetch(`${apiBaseUrl}/map/needs?t=${refreshTrigger}`)
+        const res = await apiFetch(`${apiBaseUrl}/map/needs?t=${refreshTrigger}`)
         if (!res.ok) {
           throw new Error(`Map API returned status ${res.status}`)
         }
@@ -240,16 +275,25 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
   const defaultCenter: [number, number] = [12.9716, 77.5946] // Bangalore default coordinates
 
   // Filter out any items with invalid coordinates to prevent crashes and only show active needs
-  const validItems = mapData?.items.filter(item => Number.isFinite(item.latitude) && Number.isFinite(item.longitude) && item.uncovered_quantity > 0) || []
+  const validItems = mapData?.items.filter(item => validCoordinates(item.latitude, item.longitude) && item.uncovered_quantity > 0) || []
+
+  const pendingReports = reports.filter(report => validCoordinates(report.latitude, report.longitude) && report.verification_status !== 'rejected' && !validItems.some(need => need.report_id === report.id))
+    .filter(report => report.report_type === 'emergency' || report.verification_status !== 'verified')
+  const positions = [...validItems, ...pendingReports.map(report => ({ latitude: report.latitude as number, longitude: report.longitude as number }))]
+  const missingCoordinates = reports.filter(report => report.verification_status !== 'rejected' && !validCoordinates(report.latitude, report.longitude)).length
 
   const handleShowRoute = async (item: MapNeedItem) => {
+    const requestId = ++routeRequest.current
     setRouteState(prev => ({
       ...prev,
       activeRoute: null,
       routeInfo: null,
       resourceLocation: null,
       routeError: '',
-      triggerKey: refreshTrigger
+      landmarkData: null,
+      landmarkError: '',
+      allocationId: null,
+      needId: item.need_id
     }))
 
     if (!allocations || !resources) {
@@ -257,28 +301,28 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
       return
     }
 
-    const allocation = allocations.find(a => a.need_id === item.need_id)
+    const allocation = allocations.find(a => a.need_id === item.need_id && a.remaining_quantity > 0)
     if (!allocation) {
       setRouteState(prev => ({ ...prev, routeError: 'Route unavailable: no allocation exists' }))
       return
     }
 
     const resource = resources.find(r => r.id === allocation.resource_id)
-    if (!resource || typeof resource.latitude !== 'number' || typeof resource.longitude !== 'number') {
+    if (!resource || !validCoordinates(resource.latitude, resource.longitude)) {
       setRouteState(prev => ({ ...prev, routeError: 'Route unavailable: resource coordinates missing' }))
       return
     }
 
     setFetchingRoute(true)
     try {
-      const resLat = resource.latitude
-      const resLng = resource.longitude
+      const resLat = resource.latitude as number
+      const resLng = resource.longitude as number
       const needLat = item.latitude
       const needLng = item.longitude
 
       const url = `https://router.project-osrm.org/route/v1/driving/${resLng},${resLat};${needLng},${needLat}?overview=full&geometries=geojson`
 
-      const response = await fetch(url)
+      const response = await apiFetch(url)
       if (!response.ok) throw new Error('OSRM API returned ' + response.status)
 
       const data = await response.json()
@@ -287,6 +331,7 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
       }
 
       const route = data.routes[0]
+      if (requestId !== routeRequest.current) return
       setRouteState({
         activeRoute: route.geometry,
         routeInfo: {
@@ -296,19 +341,22 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
         },
         routeError: '',
         resourceLocation: [resLat, resLng],
-        triggerKey: refreshTrigger,
+        needId: item.need_id,
+        allocationId: allocation.id,
         landmarkData: null,
         landmarkError: ''
       })
 
     } catch (err) {
+      if (requestId !== routeRequest.current) return
       setRouteState(prev => ({ ...prev, routeError: 'Route unavailable: ' + (err instanceof Error ? err.message : String(err)) }))
     } finally {
-      setFetchingRoute(false)
+      if (requestId === routeRequest.current) setFetchingRoute(false)
     }
   }
 
   const handleFindLandmark = async (item: MapNeedItem) => {
+    const requestId = ++routeRequest.current
     setRouteState(prev => ({
       ...prev,
       activeRoute: null,
@@ -317,7 +365,8 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
       routeError: '',
       landmarkData: null,
       landmarkError: '',
-      triggerKey: refreshTrigger
+      allocationId: null,
+      needId: item.need_id
     }))
 
     setFetchingLandmark(true)
@@ -334,16 +383,17 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
         out center;
       `
 
-      const response = await fetch('https://overpass-api.de/api/interpreter', {
+      const response = await apiFetch('https://overpass-api.de/api/interpreter', {
         method: 'POST',
         body: query
       })
 
       if (!response.ok) throw new Error('Overpass API returned ' + response.status)
       const data = await response.json()
+      if (requestId !== routeRequest.current) return
 
       if (!data.elements || data.elements.length === 0) {
-        setRouteState(prev => ({ ...prev, landmarkError: 'No nearby reference landmark found.', triggerKey: refreshTrigger }))
+        setRouteState(prev => ({ ...prev, landmarkError: 'No nearby reference landmark found.', needId: item.need_id }))
         return
       }
 
@@ -353,9 +403,9 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
       let nearestLng = 0
 
       data.elements.forEach((el: any) => {
-        const lat = el.lat || el.center?.lat
-        const lon = el.lon || el.center?.lon
-        if (lat && lon) {
+        const lat = el.lat ?? el.center?.lat
+        const lon = el.lon ?? el.center?.lon
+        if (validCoordinates(lat, lon)) {
           const dist = calculateHaversineDistance(needLat, needLng, lat, lon)
           if (dist < nearestDist) {
             nearestDist = dist
@@ -367,7 +417,7 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
       })
 
       if (!nearestElem) {
-        setRouteState(prev => ({ ...prev, landmarkError: 'No nearby reference landmark found.', triggerKey: refreshTrigger }))
+        setRouteState(prev => ({ ...prev, landmarkError: 'No nearby reference landmark found.', needId: item.need_id }))
         return
       }
 
@@ -381,7 +431,7 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
 
       try {
         const url = `https://router.project-osrm.org/route/v1/driving/${nearestLng},${nearestLat};${needLng},${needLat}?overview=full&geometries=geojson`
-        const osrmRes = await fetch(url)
+        const osrmRes = await apiFetch(url)
         if (osrmRes.ok) {
           const osrmData = await osrmRes.json()
           if (osrmData.code === 'Ok' && osrmData.routes && osrmData.routes.length > 0) {
@@ -399,6 +449,7 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
         routeErrStr = 'Reference route unavailable.'
       }
 
+      if (requestId !== routeRequest.current) return
       setRouteState({
         activeRoute: routeGeo,
         routeInfo: routeGeo ? {
@@ -411,13 +462,15 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
         resourceLocation: null,
         landmarkData: { name, type, lat: nearestLat, lon: nearestLng, distance: nearestDist },
         landmarkError: '',
-        triggerKey: refreshTrigger
+        needId: item.need_id,
+        allocationId: null
       })
 
     } catch {
-      setRouteState(prev => ({ ...prev, landmarkError: 'Nearby landmark service unavailable.', triggerKey: refreshTrigger }))
+      if (requestId !== routeRequest.current) return
+      setRouteState(prev => ({ ...prev, landmarkError: 'Nearby landmark service unavailable.', needId: item.need_id }))
     } finally {
-      setFetchingLandmark(false)
+      if (requestId === routeRequest.current) setFetchingLandmark(false)
     }
   }
 
@@ -444,13 +497,13 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
           <span style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--text-main)' }}>Operational Map</span>
           <span className="status-badge connected">
             <span className="status-dot"></span>
-            Active Verified Needs Only
+            Incoming Reports & Active Verified Needs
           </span>
           <span style={{ fontSize: '0.75rem', color: '#64748b', fontStyle: 'italic', marginLeft: '0.5rem' }}>
-            Completed needs are hidden from the active operational map.
+            Outlined markers: incoming reports. Solid markers: verified needs. Completed needs are hidden.
           </span>
         </div>
-        {mapState === 'connected' && mapData && (
+        {mapData && (
           <div style={{ display: 'flex', gap: '1.25rem', fontSize: '0.875rem' }}>
             <div>
               <span className="info-label" style={{ marginRight: '0.375rem' }}>Active Verified Needs:</span>
@@ -464,6 +517,18 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
         )}
       </div>
 
+      <div className="map-tools">
+        <button className="refresh-button" onClick={() => {
+          routeRequest.current += 1
+          setFetchingRoute(false)
+          setFetchingLandmark(false)
+          setRouteState(previous => ({ ...previous, activeRoute: null, routeInfo: null, resourceLocation: null, landmarkData: null, routeError: '', landmarkError: '', allocationId: null, needId: null }))
+          setFitKey(value => value + 1)
+        }}>Fit all reports & needs</button>
+        <span>{pendingReports.length} report markers · {missingCoordinates} reports without coordinates</span>
+      </div>
+      <p className="sync-note">Map tiles, route estimates and reference landmarks require internet. The report list and coordinates remain usable if these services fail. Routes do not account for disaster hazards.</p>
+      {tileUnavailable && <div className="warning-note" role="status">Map tiles unavailable. Markers remain on the coordinate map; use report addresses and coordinates below.</div>}
       <div style={{ position: 'relative', width: '100%' }}>
         {mapState === 'loading' && (
           <div className="loading-state" style={{ padding: '3rem' }}>Loading map data...</div>
@@ -475,16 +540,16 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
           </div>
         )}
 
-        {mapState === 'connected' && validItems.length === 0 && (
+        {mapState !== 'loading' && positions.length === 0 && (
           <div className="empty-state" style={{ margin: '1.5rem', border: '1px dashed var(--panel-border)' }}>
-            No verified needs with map coordinates yet.
+            No reports or active verified needs with map coordinates yet.
           </div>
         )}
 
-        {mapState === 'connected' && validItems.length > 0 && (
+        {(
           <div className="operational-map-leaflet">
             <MapContainer
-              center={validItems.length > 0 ? [validItems[0].latitude, validItems[0].longitude] : defaultCenter}
+              center={defaultCenter}
               zoom={11}
               className="operational-map-leaflet"
               style={{ backgroundColor: '#0b1220' }}
@@ -492,10 +557,11 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                eventHandlers={{ tileerror: () => setTileUnavailable(true), tileload: () => setTileUnavailable(false) }}
               />
 
               <MapResizer />
-              {validItems.length > 0 && !activeRoute && <AutoCenterMap items={validItems} />}
+              <AutoCenterMap items={positions} fitKey={fitKey} suspended={!!activeRoute} />
               {activeRoute && <AutoFitRoute routeGeometry={activeRoute} />}
 
               {activeRoute && (
@@ -526,8 +592,24 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
                 </Marker>
               )}
 
+              {pendingReports.map(report => <Marker key={`report-${report.id}`} position={[report.latitude as number, report.longitude as number]} icon={createReportMarker(report.priority ?? 'medium')}>
+                <Popup><div className="incoming-map-popup">
+                  <strong>Report #{report.id} · {report.category}</strong>
+                  <p>{report.priority ?? 'medium'} priority · {report.verification_status}</p>
+                  {report.is_synthetic && <p>Synthetic demo report</p>}
+                  <p>{report.description}</p><p>{report.location}</p>
+                  <p>{report.latitude?.toFixed(5)}, {report.longitude?.toFixed(5)}</p>
+                  <p>{displayTime(report.timestamp)}</p>
+                  <button className="btn-open-report" onClick={() => onOpenReport?.(report)}>Open Report #{report.id}</button>
+                </div></Popup>
+              </Marker>)}
               {validItems.map((item) => {
-                const markerIcon = createCustomMarkerIcon(item.uncovered_quantity, item.allocated_quantity)
+                const routeInfo = isRouteValid && routeState.needId === item.need_id ? routeState.routeInfo : null
+                const routeError = isRouteValid && routeState.needId === item.need_id ? routeState.routeError : ''
+                const landmarkData = isRouteValid && routeState.needId === item.need_id ? routeState.landmarkData : null
+                const landmarkError = isRouteValid && routeState.needId === item.need_id ? routeState.landmarkError : ''
+                const outstanding = item.outstanding_allocated_quantity ?? item.allocated_quantity
+                const markerIcon = createCustomMarkerIcon(item.uncovered_quantity, outstanding)
                 return (
                   <Marker
                     key={item.need_id}
@@ -565,14 +647,16 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
                           <strong>{item.coverage_percent}%</strong>
                         </div>
 
+                        <p style={{ fontSize: '0.8rem' }}>{item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}</p>
+                        <button className="btn-open-report" onClick={() => { const report = reports.find(report => report.id === item.report_id); if (report) onOpenReport?.(report) }}>Open Source Report</button>
                         <div style={{ marginTop: '0.75rem', borderTop: '1px solid #e2e8f0', paddingTop: '0.5rem' }}>
-                          {item.allocated_quantity > 0 ? (
+                          {outstanding > 0 ? (
                             <>
                               <button
                                 className="btn-action confirm"
                                 style={{ width: '100%', fontSize: '0.8rem', padding: '0.25rem', height: 'auto' }}
                                 onClick={() => handleShowRoute(item)}
-                                disabled={fetchingRoute}
+                                disabled={fetchingRoute || fetchingLandmark}
                               >
                                 {fetchingRoute ? 'Calculating...' : 'Show Suggested Route'}
                               </button>
@@ -599,7 +683,7 @@ export function OperationalMap({ apiBaseUrl, refreshTrigger, resources, allocati
                                 className="btn-action"
                                 style={{ width: '100%', fontSize: '0.8rem', padding: '0.25rem', height: 'auto', backgroundColor: '#8b5cf6', color: 'white', border: 'none' }}
                                 onClick={() => handleFindLandmark(item)}
-                                disabled={fetchingLandmark}
+                                disabled={fetchingLandmark || fetchingRoute}
                               >
                                 {fetchingLandmark ? 'Searching...' : 'Find Nearby Landmark'}
                               </button>
