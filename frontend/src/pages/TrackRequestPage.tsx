@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getPublicRequest } from '../services/api';
 import { PublicRequestResponse } from '../types';
+import { formatTimestamp, statusLabel, statusDescription } from '../utils/publicRequest';
 
 export const TrackRequestPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -9,102 +10,55 @@ export const TrackRequestPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [requestData, setRequestData] = useState<PublicRequestResponse | null>(null);
+  const [refreshCount, setRefreshCount] = useState(0);
+  const [lastChecked, setLastChecked] = useState<string | null>(null);
+  const requestId = (searchParams.get('id') || '').trim().toUpperCase();
 
   useEffect(() => {
-    const id = searchParams.get('id');
-    if (id) {
-      setTrackingCode(id);
-      fetchRequest(id);
-    }
-  }, [searchParams]);
-
-  const fetchRequest = async (idToSearch: string) => {
-    if (!idToSearch.trim() || isLoading) return;
-
-    setIsLoading(true);
+    setTrackingCode(requestId);
+    setRequestData((previous) => previous?.request_id === requestId ? previous : null);
+    setLastChecked(null);
     setErrorMsg(null);
-
-    // We intentionally don't clear requestData here so the UI doesn't flash empty while refreshing
-
-    // Update URL without reloading
-    if (searchParams.get('id') !== idToSearch) {
-      setSearchParams({ id: idToSearch });
-    }
-
-    const result = await getPublicRequest(idToSearch.trim());
-
-    if (result.success && result.request) {
-      setRequestData(result.request);
-    } else {
-      setRequestData(null);
-      if (result.errorMessage?.toLowerCase().includes('failed to fetch') || result.errorMessage?.toLowerCase().includes('network error')) {
-        setErrorMsg('Network error: Unable to reach the server. Please check your connection and try again.');
-      } else {
-        setErrorMsg(result.errorMessage || 'Failed to retrieve request. Please ensure the Request ID is correct.');
-      }
-    }
-
     setIsLoading(false);
-  };
+    if (!requestId) return;
+    if (!/^CR-[1-9]\d*$/.test(requestId)) {
+      setErrorMsg('Enter a valid request ID, such as CR-1.');
+      return;
+    }
+
+    let active = true;
+    let inFlight = false;
+    const controller = new AbortController();
+    const load = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      setIsLoading(true);
+      const result = await getPublicRequest(requestId, controller.signal);
+      if (!active) return;
+      if (result.success && result.request) {
+        setRequestData(result.request);
+        setErrorMsg(null);
+        setLastChecked(new Date().toLocaleTimeString());
+      } else {
+        setErrorMsg(result.errorMessage || 'Unable to check the latest status. Retrying automatically.');
+      }
+      inFlight = false;
+      setIsLoading(false);
+    };
+    void load();
+    const timer = window.setInterval(() => { void load(); }, 5000);
+    return () => {
+      active = false;
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [requestId, refreshCount]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    fetchRequest(trackingCode);
-  };
-
-  const formatStatus = (status: string) => {
-    switch (status) {
-      case 'under_review':
-        return 'Under Review';
-      case 'verified':
-        return 'Verified';
-      case 'assigned':
-        return 'Assigned / Scheduled';
-      case 'in_progress':
-        return 'In Progress / Out for Delivery';
-      case 'resolved':
-        return 'Resolved';
-      default:
-        return status.replace('_', ' ');
-    }
-  };
-
-  const getStatusDescription = (status: string) => {
-    switch (status) {
-      case 'under_review':
-        return 'Your request has been received and is currently being reviewed by response coordinators.';
-      case 'verified':
-        return 'Your request has been verified and added to the active response queue.';
-      case 'assigned':
-        return 'A response team has been assigned to address your situation.';
-      case 'in_progress':
-        return 'Help is on the way. The response team is currently in progress or out for delivery.';
-      case 'resolved':
-        return 'This request has been marked as resolved by the response team.';
-      default:
-        return 'Status is currently being updated.';
-    }
-  };
-
-  const formatSubmittedAt = (submittedAt: string | null | undefined) => {
-    if (!submittedAt) {
-      return 'N/A';
-    }
-
-    // Backend timestamps are UTC. If the backend does not include
-    // an explicit timezone suffix, treat the timestamp as UTC.
-    const utcTimestamp = submittedAt.endsWith('Z')
-      ? submittedAt
-      : `${submittedAt}Z`;
-
-    const date = new Date(utcTimestamp);
-
-    if (Number.isNaN(date.getTime())) {
-      return 'N/A';
-    }
-
-    // Convert to the user's browser-local timezone.
-    return date.toLocaleString();
+    const normalized = trackingCode.trim().toUpperCase();
+    if (normalized === requestId) setRefreshCount((count) => count + 1);
+    else setSearchParams({ id: normalized });
   };
 
   return (
@@ -120,7 +74,7 @@ export const TrackRequestPage: React.FC = () => {
           <span className="section-badge">Citizen Tracking</span>
           <h1 className="page-title">Track Your Assistance Request</h1>
           <p className="page-subtitle">
-            Check the verification and dispatch status of your submitted emergency or relief request.
+            Follow human review, supply allocation, and recorded delivery updates for your request.
           </p>
         </div>
 
@@ -158,12 +112,13 @@ export const TrackRequestPage: React.FC = () => {
           {errorMsg && (
             <div className="alert alert-danger mt-4" role="status" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div>
-                <strong>Error:</strong> {errorMsg}
+                <strong>{requestData ? 'Latest update unavailable:' : 'Error:'}</strong> {errorMsg}
+                {requestData && <p>Showing the last successfully retrieved status. Automatic checks continue every five seconds.</p>}
               </div>
               <div>
                 <button
                   className="btn btn-outline btn-sm"
-                  onClick={() => fetchRequest(trackingCode)}
+                  onClick={() => setRefreshCount((count) => count + 1)}
                   disabled={isLoading}
                   style={{ backgroundColor: '#fff' }}
                 >
@@ -183,30 +138,30 @@ export const TrackRequestPage: React.FC = () => {
                 </p>
 
                 <div className="privacy-badge mt-4">
-                  🔒 Public Tracking Guarantee: Citizen status checks never expose internal responder reconciliation or operational logs.
+                  Anyone with a request ID can view its public tracking details. Use synthetic information for the demo.
                 </div>
               </div>
             </div>
           )}
 
           {requestData && (
-            <div className="track-status-box mt-4">
+            <div className="track-status-box mt-4" aria-live="polite">
               <div className="status-box-content">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
                   <div>
                     <h4 style={{ marginBottom: '8px' }}>
                       Request Status:{' '}
                       <span className="status-badge capitalize">
-                        {formatStatus(requestData.status)}
+                        {statusLabel(requestData.status)}
                       </span>
                     </h4>
                     <p style={{ color: 'var(--slate-600)', fontSize: '14px', margin: 0, maxWidth: '500px' }}>
-                      {getStatusDescription(requestData.status)}
+                      {statusDescription(requestData.status)}
                     </p>
                   </div>
 
                   <button
-                    onClick={() => fetchRequest(requestData.request_id)}
+                    onClick={() => setRefreshCount((count) => count + 1)}
                     className="btn btn-secondary"
                     disabled={isLoading}
                     style={{ whiteSpace: 'nowrap' }}
@@ -214,8 +169,14 @@ export const TrackRequestPage: React.FC = () => {
                     {isLoading ? 'Refreshing...' : 'Check Latest Status'}
                   </button>
                 </div>
+                <p className="form-helper">Automatically checks every 5 seconds.{lastChecked ? ` Last checked at ${lastChecked}.` : ''}</p>
 
                 <div className="preview-body mt-3">
+                  <div className="preview-item">
+                    <span className="preview-label">Urgency:</span>
+                    <span className="preview-val capitalize">{requestData.priority}</span>
+                  </div>
+
                   <div className="preview-item">
                     <span className="preview-label">Request ID:</span>
                     <span className="preview-val">
@@ -247,13 +208,34 @@ export const TrackRequestPage: React.FC = () => {
                   <div className="preview-item">
                     <span className="preview-label">Submitted At:</span>
                     <span className="preview-val">
-                      {formatSubmittedAt(requestData.submitted_at)}
+                      {formatTimestamp(requestData.submitted_at)}
                     </span>
                   </div>
+                  <div className="preview-item">
+                    <span className="preview-label">Last Update:</span>
+                    <span className="preview-val">{formatTimestamp(requestData.updated_at)}</span>
+                  </div>
+                  {requestData.reviewed_at && <div className="preview-item">
+                    <span className="preview-label">Human Review:</span>
+                    <span className="preview-val">{formatTimestamp(requestData.reviewed_at)}</span>
+                  </div>}
+                  {requestData.review_note && <div className="preview-item">
+                    <span className="preview-label">Responder Note:</span>
+                    <p className="preview-desc">{requestData.review_note}</p>
+                  </div>}
                 </div>
 
+                {requestData.coverage && <div className="form-section-card mt-4">
+                  <h4>Verified supply need</h4>
+                  <div className="preview-item"><span className="preview-label">Required:</span><strong>{requestData.coverage.verified_quantity} {requestData.coverage.unit}</strong></div>
+                  <div className="preview-item"><span className="preview-label">Delivered:</span><strong>{requestData.coverage.delivered_quantity} {requestData.coverage.unit}</strong></div>
+                  <div className="preview-item"><span className="preview-label">Remaining:</span><strong>{requestData.coverage.uncovered_quantity} {requestData.coverage.unit}</strong></div>
+                  <div className="preview-item"><span className="preview-label">Allocated, awaiting delivery:</span><strong>{requestData.coverage.outstanding_allocated_quantity} {requestData.coverage.unit}</strong></div>
+                  <p className="form-helper">{requestData.coverage.coverage_percent.toFixed(1)}% of the verified need has been delivered. Allocations do not count as completed deliveries.</p>
+                </div>}
+
                 <div className="privacy-badge mt-4">
-                  🔒 Public Tracking Guarantee: Citizen status checks never expose internal responder reconciliation or operational logs.
+                  Public tracking shows the responder's review note and delivery totals. Internal reconciliation and audit logs stay in the responder interface.
                 </div>
               </div>
             </div>
@@ -279,7 +261,7 @@ export const TrackRequestPage: React.FC = () => {
           <div className="faq-card">
             <h4>Can I update my location?</h4>
             <p>
-              If you have evacuated or moved to a different shelter, you will be able to file an updated location reference connected to your tracking ID.
+              This prototype cannot edit submitted requests. Tell the coordinator your request ID and new location so they can review the change.
             </p>
           </div>
         </div>

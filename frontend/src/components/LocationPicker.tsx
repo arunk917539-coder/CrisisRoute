@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useLocationContext, formatCoordinates } from '../context/LocationContext';
 
-export const LocationPicker: React.FC = () => {
+export const LocationPicker: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
+  const InputGroup = embedded ? 'div' : 'form';
   const {
     locationData,
     isCustomLocationSet,
@@ -25,8 +26,8 @@ export const LocationPicker: React.FC = () => {
   const [manualLng, setManualLng] = useState('');
   const [coordsError, setCoordsError] = useState<string | null>(null);
 
-  const handleAddressSearchSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddressSearchSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     const query = addressQuery.trim();
     if (!query) {
       setAddressSearchFeedback({
@@ -55,16 +56,16 @@ export const LocationPicker: React.FC = () => {
     }
   };
 
-  const handleManualCoordsSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const latNum = parseFloat(manualLat);
-    const lngNum = parseFloat(manualLng);
+  const handleManualCoordsSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const latNum = Number(manualLat);
+    const lngNum = Number(manualLng);
 
-    if (isNaN(latNum) || latNum < -90 || latNum > 90) {
+    if (!manualLat.trim() || !Number.isFinite(latNum) || latNum < -90 || latNum > 90) {
       setCoordsError('Latitude must be a valid number between -90 and 90');
       return;
     }
-    if (isNaN(lngNum) || lngNum < -180 || lngNum > 180) {
+    if (!manualLng.trim() || !Number.isFinite(lngNum) || lngNum < -180 || lngNum > 180) {
       setCoordsError('Longitude must be a valid number between -180 and 180');
       return;
     }
@@ -88,7 +89,7 @@ export const LocationPicker: React.FC = () => {
       <div className="location-header-row">
         <div className="location-title-group">
           <span className="location-badge">
-            {locationData.source === 'gps' && 'GPS Verified'}
+            {locationData.source === 'gps' && 'Device GPS'}
             {locationData.source === 'map_click' && 'Map Pinpoint'}
             {locationData.source === 'address_search' && 'Address Resolved'}
             {locationData.source === 'manual' && 'Manual Coordinates'}
@@ -188,11 +189,11 @@ export const LocationPicker: React.FC = () => {
         <div className="manual-location-panel">
           <h4 className="manual-panel-title">Search Address or Enter Coordinates</h4>
           <p className="manual-panel-subtitle">
-            Search for an area name or enter exact GPS coordinates. Submitting will resolve the location and move the map marker automatically.
+            Address search and map tiles need internet access. Known coordinates work without those services. GPS may be unavailable over an ordinary LAN HTTP address.
           </p>
 
           {/* Address Search Form */}
-          <form onSubmit={handleAddressSearchSubmit} className="manual-form">
+          <InputGroup onSubmit={embedded ? undefined : handleAddressSearchSubmit} className="manual-form">
             <label htmlFor="address-search-input" className="form-label">
               Search Street, Landmark, or Area:
             </label>
@@ -207,14 +208,15 @@ export const LocationPicker: React.FC = () => {
                 disabled={isSearchingAddress}
               />
               <button
-                type="submit"
+                type={embedded ? 'button' : 'submit'}
+                onClick={embedded ? () => { void handleAddressSearchSubmit(); } : undefined}
                 className="btn btn-secondary"
                 disabled={isSearchingAddress}
               >
                 {isSearchingAddress ? 'Searching...' : 'Search & Center Map'}
               </button>
             </div>
-          </form>
+          </InputGroup>
 
           {addressSearchFeedback && (
             <div
@@ -232,7 +234,7 @@ export const LocationPicker: React.FC = () => {
           </div>
 
           {/* Direct Coordinate Form */}
-          <form onSubmit={handleManualCoordsSubmit} className="manual-coords-form">
+          <InputGroup onSubmit={embedded ? undefined : handleManualCoordsSubmit} className="manual-coords-form">
             <div className="coords-inputs-row">
               <div className="coord-field">
                 <label htmlFor="manual-lat-input" className="form-label">
@@ -263,12 +265,12 @@ export const LocationPicker: React.FC = () => {
               </div>
 
               <div className="coord-btn-container">
-                <button type="submit" className="btn btn-secondary">
+                <button type={embedded ? 'button' : 'submit'} onClick={embedded ? () => handleManualCoordsSubmit() : undefined} className="btn btn-secondary">
                   Set Coords
                 </button>
               </div>
             </div>
-          </form>
+          </InputGroup>
 
           {coordsError && (
             <p className="form-error-text" role="alert">

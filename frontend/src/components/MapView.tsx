@@ -1,8 +1,9 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { LocationCoordinates } from '../types';
 import { formatCoordinates } from '../context/LocationContext';
+import { escapeHtml } from '../utils/publicRequest';
 
 interface MapViewProps {
   selectedCoordinates: LocationCoordinates;
@@ -55,7 +56,7 @@ const gpsIcon = L.divIcon({
 function getSourceLabel(source?: string): string {
   switch (source) {
     case 'gps':
-      return 'GPS Verified';
+      return 'Device GPS';
     case 'map_click':
       return 'Manual Map Selection';
     case 'address_search':
@@ -83,6 +84,7 @@ export const MapView: React.FC<MapViewProps> = ({
   const selectedMarkerRef = useRef<L.Marker | null>(null);
   const gpsMarkerRef = useRef<L.Marker | null>(null);
   const callbackRef = useRef(onSelectLocation);
+  const [tilesUnavailable, setTilesUnavailable] = useState(false);
 
   // Keep callback fresh in ref
   useEffect(() => {
@@ -103,11 +105,13 @@ export const MapView: React.FC<MapViewProps> = ({
       });
 
       // Free, open OpenStreetMap tile layer
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution:
           '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors',
       }).addTo(map);
+      tiles.on('tileerror', () => setTilesUnavailable(true));
+      tiles.on('tileload', () => setTilesUnavailable(false));
 
       // Handle map clicks to set/move location
       map.on('click', (e: L.LeafletMouseEvent) => {
@@ -121,15 +125,15 @@ export const MapView: React.FC<MapViewProps> = ({
       mapInstanceRef.current = map;
 
       // Invalidate size once container mounts properly
-      setTimeout(() => {
-        map.invalidateSize();
-      }, 150);
+      map.invalidateSize();
     }
 
     return () => {
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
+        selectedMarkerRef.current = null;
+        gpsMarkerRef.current = null;
       }
     };
     // Run only on mount and unmount
@@ -182,7 +186,7 @@ export const MapView: React.FC<MapViewProps> = ({
     const popupContent = `
       <div style="font-family: inherit; font-size: 13px; line-height: 1.4; min-width: 180px;">
         <strong style="color: #b91c1c; font-size: 14px;">Selected Location</strong><br/>
-        <div style="margin: 4px 0; color: #1e293b;">${displayAddress}</div>
+        <div style="margin: 4px 0; color: #1e293b;">${escapeHtml(displayAddress)}</div>
         <div style="font-family: monospace; font-size: 12px; color: #475569;">
           Lat: ${selectedCoordinates.lat.toFixed(5)}<br/>
           Lng: ${selectedCoordinates.lng.toFixed(5)}
@@ -257,6 +261,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
   return (
     <div className="map-view-wrapper">
+      {tilesUnavailable && <div className="alert alert-warning" role="status">Map tiles are unavailable. Use Search Address / Coords to enter known coordinates; submission still works when the backend is reachable.</div>}
       {/* Map Canvas */}
       <div
         ref={mapContainerRef}

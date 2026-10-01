@@ -12,7 +12,7 @@ export const Footer: React.FC = () => {
           </div>
           <p className="footer-description">
             A public crisis coordination platform designed to help affected citizens report emergency situations,
-            pinpoint their location, and communicate verified relief needs directly to authorized response coordinators.
+            pinpoint their location, and send relief needs to response coordinators for human review.
           </p>
           <span className="footer-status-pill">
             Citizen Public Experience &bull; Build for Billions Hackathon
@@ -37,8 +37,7 @@ export const Footer: React.FC = () => {
         <div className="footer-col">
           <h4 className="footer-heading">Safety &amp; Privacy</h4>
           <p className="footer-safety-text">
-            Your location and crisis details are used strictly to coordinate humanitarian relief and emergency aid.
-            Admin and dispatch records remain protected under responder protocol.
+            This is a hackathon prototype. Use synthetic details in the demo. Anyone with a request ID can view its public tracking details.
           </p>
           <p className="footer-safety-notice">
             In imminent danger, always dial local emergency dispatch (911 / 112).

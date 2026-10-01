@@ -1,12 +1,29 @@
-import { CitizenReportDraft, ApiSubmissionStatus, PublicReportPayload, SubmitReportOutcome, PublicRequestResponse } from '../types';
+import { PublicReportPayload, SubmitReportOutcome, PublicRequestResponse } from '../types';
 
-const baseUrl = import.meta.env.VITE_API_BASE_URL;
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL?.trim() || '/api').replace(/\/+$/, '');
 
-if (!baseUrl) {
-  throw new Error("VITE_API_BASE_URL is not defined in the environment. Please configure it in your .env file.");
+async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  const abort = () => controller.abort();
+  if (options.signal?.aborted) controller.abort();
+  options.signal?.addEventListener('abort', abort, { once: true });
+  try {
+    return await fetch(`${API_BASE_URL}${path}`, { ...options, signal: controller.signal, cache: 'no-store' });
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener('abort', abort);
+  }
 }
 
-export const API_BASE_URL = baseUrl;
+function networkMessage(err: unknown, submitting = false): string {
+  if (err instanceof Error && err.name === 'AbortError') {
+    return submitting
+      ? 'The server did not respond in time. The request may have arrived; ask the demo coordinator to check before submitting again.'
+      : 'The server did not respond in time. Status will retry automatically.';
+  }
+  return 'Unable to reach the server. Check your connection and the shared backend, then try again.';
+}
 
 /**
  * Health check helper to verify backend availability.
@@ -14,12 +31,7 @@ export const API_BASE_URL = baseUrl;
  */
 export async function checkBackendHealth(): Promise<{ isOnline: boolean; demoData?: string; error?: string }> {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
-    const response = await fetch(`${API_BASE_URL}/health`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
+    const response = await apiFetch('/health');
 
     if (response.ok) {
       const data = await response.json();
@@ -41,7 +53,7 @@ export async function createPublicReport(
   payload: PublicReportPayload
 ): Promise<SubmitReportOutcome> {
   try {
-    const response = await fetch(`${API_BASE_URL}/public/reports`, {
+    const response = await apiFetch('/public/reports', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -67,7 +79,7 @@ export async function createPublicReport(
   } catch (err) {
     return {
       success: false,
-      errorMessage: err instanceof Error ? err.message : 'Network error occurred while submitting.',
+      errorMessage: networkMessage(err, true),
     };
   }
 }
@@ -75,14 +87,16 @@ export async function createPublicReport(
 /**
  * Retrieve a public citizen request from GET /public/requests/{request_id}.
  */
-export async function getPublicRequest(requestId: string): Promise<{ success: boolean; request?: PublicRequestResponse; errorMessage?: string }> {
+export async function getPublicRequest(requestId: string, signal?: AbortSignal): Promise<{ success: boolean; request?: PublicRequestResponse; errorMessage?: string }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/public/requests/${encodeURIComponent(requestId)}`);
+    const response = await apiFetch(`/public/requests/${encodeURIComponent(requestId)}`, { signal });
 
     if (!response.ok) {
       let errorMessage = `Retrieval failed (${response.status})`;
       if (response.status === 404) {
         errorMessage = 'Request ID not found. Please check and try again.';
+      } else if (response.status === 400) {
+        errorMessage = 'Enter a valid request ID, such as CR-1.';
       }
       return { success: false, errorMessage };
     }
@@ -90,6 +104,6 @@ export async function getPublicRequest(requestId: string): Promise<{ success: bo
     const data: PublicRequestResponse = await response.json();
     return { success: true, request: data };
   } catch (err) {
-    return { success: false, errorMessage: 'Network error occurred while retrieving request.' };
+    return { success: false, errorMessage: networkMessage(err) };
   }
 }

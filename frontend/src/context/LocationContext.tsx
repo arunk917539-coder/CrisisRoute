@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { LocationCoordinates, LocationData, GeolocationStatus } from '../types';
 import { useGeolocation } from '../hooks/useGeolocation';
 
@@ -206,13 +206,6 @@ export const LocationProvider: React.FC<{ children: ReactNode }> = ({ children }
     });
     setIsCustomLocationSet(false);
   }, []);
-
-  // Update when GPS coordinates successfully arrive
-  useEffect(() => {
-    if (gpsCoords && status === 'success') {
-      setSelectedCoordinates(gpsCoords, 'gps');
-    }
-  }, [gpsCoords, status, setSelectedCoordinates]);
 
   return (
     <LocationContext.Provider

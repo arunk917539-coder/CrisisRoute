@@ -47,8 +47,8 @@ export const HomePage: React.FC = () => {
 
             <div className="hero-trust-badges">
               <span className="trust-item">✓ Open-source &amp; Free</span>
-              <span className="trust-item">✓ GPS &amp; Offline Pinpoint</span>
-              <span className="trust-item">✓ Verified Response Teams</span>
+              <span className="trust-item">✓ GPS &amp; Manual Coordinates</span>
+              <span className="trust-item">✓ Human Review</span>
             </div>
           </div>
 
@@ -164,7 +164,7 @@ export const HomePage: React.FC = () => {
               <div className="step-number">03</div>
               <h3 className="step-card-title">Verified Coordinator Review</h3>
               <p className="step-card-text">
-                Authorized human field responders verify needs against available inventory and dispatch coordinated supply drops or rescue missions.
+                Human responders review reports, verify needs, allocate available supplies, and record deliveries in the shared dashboard.
               </p>
             </div>
           </div>

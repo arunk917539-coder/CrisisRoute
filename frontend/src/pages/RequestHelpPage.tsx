@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useLocationContext, formatCoordinates } from '../context/LocationContext';
 import { MapView } from '../components/MapView';
-import { ReportType, CitizenReportDraft, PublicReportPayload } from '../types';
+import { LocationPicker } from '../components/LocationPicker';
+import { ReportType, Priority, CitizenReportDraft, PublicReportPayload } from '../types';
 import { createPublicReport } from '../services/api';
 
 export const RequestHelpPage: React.FC = () => {
@@ -22,8 +23,7 @@ export const RequestHelpPage: React.FC = () => {
   const [locationText, setLocationText] = useState<string>(locationData.address);
   const [peopleAffected, setPeopleAffected] = useState<string>('1');
   const [requiredQuantity, setRequiredQuantity] = useState<string>('5');
-  const [evidenceStatus, setEvidenceStatus] = useState<'none' | 'photo' | 'document' | 'other'>('none');
-  const [evidenceSource, setEvidenceSource] = useState<string>('Citizen direct report');
+  const [priority, setPriority] = useState<Priority>('medium');
   const [evidenceNote, setEvidenceNote] = useState<string>('');
 
   // UI state
@@ -31,67 +31,47 @@ export const RequestHelpPage: React.FC = () => {
   const [previewDraft, setPreviewDraft] = useState<CitizenReportDraft | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(null);
-
-  // GPS state
-  const [gpsStatus, setGpsStatus] = useState<'idle' | 'success' | 'denied' | 'error'>('idle');
-  const [capturedLatitude, setCapturedLatitude] = useState<number | null>(null);
-  const [capturedLongitude, setCapturedLongitude] = useState<number | null>(null);
-
-  const handleCaptureLocation = () => {
-    if (!navigator.geolocation) {
-      setGpsStatus('error');
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setCapturedLatitude(position.coords.latitude);
-        setCapturedLongitude(position.coords.longitude);
-        setGpsStatus('success');
-      },
-      (error) => {
-        if (error.code === error.PERMISSION_DENIED) {
-          setGpsStatus('denied');
-        } else {
-          setGpsStatus('error');
-        }
-      }
-    );
-  };
+  const submissionInFlight = useRef(false);
+  const locationWasEdited = useRef(false);
+  const selectedPoint = `${locationData.coordinates.lat},${locationData.coordinates.lng}`;
+  const previousPoint = useRef(selectedPoint);
 
   // Sync location text if locationData updates from context
   useEffect(() => {
-    if (locationData.address) {
-      setLocationText(locationData.address);
+    if (previousPoint.current !== selectedPoint) {
+      locationWasEdited.current = false;
+      previousPoint.current = selectedPoint;
     }
-  }, [locationData.address]);
+    if (locationData.address && !locationWasEdited.current) {
+      setLocationText(locationData.address.slice(0, 200));
+    }
+  }, [locationData.address, selectedPoint]);
 
   // Adjust quantity default based on report type
   const handleReportTypeChange = (type: ReportType) => {
+    if (type === reportType) return;
     setReportType(type);
     if (type === 'emergency') {
+      setPriority('critical');
       setRequiredQuantity('0');
-      if (category === 'food' || category === 'water') {
-        setCategory('rescue');
-      }
+      setCategory('rescue');
     } else {
+      setPriority('medium');
       if (requiredQuantity === '0') {
         setRequiredQuantity('5');
       }
-      if (category === 'rescue') {
-        setCategory('food');
-      }
+      setCategory('food');
     }
   };
 
   const validateForm = (): CitizenReportDraft | null => {
     const desc = description.trim();
     const loc = locationText.trim();
-    const people = parseInt(peopleAffected, 10);
-    const qty = parseFloat(requiredQuantity);
+    const people = Number(peopleAffected);
+    const qty = Number(requiredQuantity);
 
-    if (loc.length < 2) {
-      setValidationError('Please specify a location (at least 2 characters) or select one on the map.');
+    if (loc.length < 2 || loc.length > 200) {
+      setValidationError('Please specify a location between 2 and 200 characters.');
       return null;
     }
 
@@ -101,15 +81,15 @@ export const RequestHelpPage: React.FC = () => {
       );
       return null;
     }
-    if (desc.length < 5) {
-      setValidationError('Please provide a description of the situation (at least 5 characters).');
+    if (desc.length < 5 || desc.length > 500) {
+      setValidationError('Please describe the situation in 5 to 500 characters.');
       return null;
     }
-    if (isNaN(people) || people < 0) {
-      setValidationError('People affected must be 0 or greater.');
+    if (!peopleAffected.trim() || !Number.isSafeInteger(people) || people < 0 || people > 10_000_000) {
+      setValidationError('People affected must be a whole number from 0 to 10,000,000.');
       return null;
     }
-    if (reportType === 'relief' && (isNaN(qty) || qty <= 0)) {
+    if (reportType === 'relief' && (!Number.isFinite(qty) || qty <= 0 || qty > 1_000_000_000)) {
       setValidationError('Relief requests require a positive quantity needed (e.g. food packets, water bottles).');
       return null;
     }
@@ -125,12 +105,11 @@ export const RequestHelpPage: React.FC = () => {
       category: category.trim(),
       description: desc,
       location: loc,
-      latitude: capturedLatitude !== null ? capturedLatitude : (isCustomLocationSet ? locationData.coordinates.lat : null),
-      longitude: capturedLongitude !== null ? capturedLongitude : (isCustomLocationSet ? locationData.coordinates.lng : null),
+      latitude: isCustomLocationSet ? locationData.coordinates.lat : null,
+      longitude: isCustomLocationSet ? locationData.coordinates.lng : null,
       people_affected: people,
       required_quantity: reportType === 'emergency' ? 0 : qty,
-      evidence_status: evidenceStatus,
-      evidence_source: evidenceSource.trim() || 'Citizen direct report',
+      priority,
       evidence_note: evidenceNote.trim(),
     };
   };
@@ -144,11 +123,12 @@ export const RequestHelpPage: React.FC = () => {
   };
 
   const handleSubmitRequest = async () => {
-    if (isSubmitting) return;
+    if (submissionInFlight.current) return;
 
     const draft = validateForm();
     if (!draft) return;
 
+    submissionInFlight.current = true;
     setPreviewDraft(draft);
     setIsSubmitting(true);
     setValidationError(null);
@@ -161,7 +141,9 @@ export const RequestHelpPage: React.FC = () => {
       latitude: draft.latitude,
       longitude: draft.longitude,
       people_affected: draft.people_affected,
-      required_quantity: draft.required_quantity
+      required_quantity: draft.required_quantity,
+      priority: draft.priority,
+      evidence_note: draft.evidence_note,
     };
 
     const result = await createPublicReport(payload);
@@ -173,6 +155,7 @@ export const RequestHelpPage: React.FC = () => {
     }
 
     setIsSubmitting(false);
+    submissionInFlight.current = false;
   };
 
   return (
@@ -190,7 +173,7 @@ export const RequestHelpPage: React.FC = () => {
             <div className="notice-icon" style={{ fontSize: '48px', marginBottom: '16px' }}>✅</div>
             <h2 style={{ fontSize: '28px', color: 'var(--success-700)', marginBottom: '8px' }}>Request Successfully Created</h2>
             <p style={{ fontSize: '16px', color: 'var(--slate-600)', marginBottom: '24px' }}>
-              Your emergency or relief request has been received by the crisis response network and will be reviewed shortly.
+              Your request has been saved to the shared backend and is waiting for human review.
             </p>
 
             <div className="request-id-display" style={{ backgroundColor: 'var(--slate-50)', padding: '20px', borderRadius: '8px', border: '1px dashed var(--slate-300)', marginBottom: '24px' }}>
@@ -199,7 +182,7 @@ export const RequestHelpPage: React.FC = () => {
             </div>
 
             <p style={{ fontSize: '14px', color: 'var(--slate-500)', marginBottom: '32px' }}>
-              Please save this ID. You can use it to track the real-time verification and dispatch status of your request without exposing any personal data.
+              Please save this ID to follow review and delivery updates. Tracking refreshes every five seconds.
             </p>
 
             <div className="preview-actions" style={{ display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
@@ -316,6 +299,8 @@ export const RequestHelpPage: React.FC = () => {
                           id="people-affected"
                           type="number"
                           min="0"
+                          max="10000000"
+                          step="1"
                           value={peopleAffected}
                           onChange={(e) => setPeopleAffected(e.target.value)}
                           className="form-input"
@@ -331,6 +316,8 @@ export const RequestHelpPage: React.FC = () => {
                           id="required-qty"
                           type="number"
                           min={reportType === 'relief' ? '1' : '0'}
+                          max="1000000000"
+                          step="any"
                           disabled={reportType === 'emergency'}
                           value={reportType === 'emergency' ? '0' : requiredQuantity}
                           onChange={(e) => setRequiredQuantity(e.target.value)}
@@ -342,16 +329,25 @@ export const RequestHelpPage: React.FC = () => {
                         )}
                       </div>
                     </div>
+                    <div className="form-group">
+                      <label htmlFor="priority-select" className="form-label">Urgency</label>
+                      <select id="priority-select" className="form-input form-select" value={priority} onChange={(event) => setPriority(event.target.value as Priority)}>
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="critical">Critical</option>
+                      </select>
+                      <small className="form-helper">Your assessment helps coordinators prioritize human review.</small>
+                    </div>
                   </div>
 
                   {/* Location Information */}
                   <div className="form-section-card">
                     <div className="card-heading-row">
                       <h3 className="card-heading">3. Location Information</h3>
-                      <Link to="/" className="link-action">
-                        Change Pin on Map &rarr;
-                      </Link>
                     </div>
+
+                    <LocationPicker embedded />
 
                     <div className="form-group">
                       <label htmlFor="report-location-text" className="form-label">
@@ -360,8 +356,9 @@ export const RequestHelpPage: React.FC = () => {
                       <input
                         id="report-location-text"
                         type="text"
+                        maxLength={200}
                         value={locationText}
-                        onChange={(e) => setLocationText(e.target.value)}
+                        onChange={(e) => { locationWasEdited.current = true; setLocationText(e.target.value); }}
                         className="form-input"
                         placeholder="Enter street, landmark, building, or village name"
                       />
@@ -382,25 +379,6 @@ export const RequestHelpPage: React.FC = () => {
                         {isCustomLocationSet && (
                           <span className="source-tag">({locationData.source})</span>
                         )}
-                      </div>
-                    </div>
-
-                    <div className="form-group" style={{ marginTop: '1rem', padding: '1rem', backgroundColor: 'var(--slate-50)', borderRadius: '8px', border: '1px solid var(--slate-200)' }}>
-                      <label className="form-label" style={{ marginBottom: '0.5rem', display: 'block', fontWeight: 600 }}>GPS Location (Recommended)</label>
-                      <button
-                        type="button"
-                        onClick={handleCaptureLocation}
-                        className="btn btn-secondary"
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}
-                      >
-                        📍 Use My Current Location
-                      </button>
-
-                      <div style={{ fontSize: '0.875rem' }}>
-                        {gpsStatus === 'idle' && <span style={{ color: 'var(--slate-500)' }}>Location not captured</span>}
-                        {gpsStatus === 'success' && <span style={{ color: '#16a34a', fontWeight: 500 }}>Location captured successfully ({capturedLatitude?.toFixed(5)}, {capturedLongitude?.toFixed(5)})</span>}
-                        {gpsStatus === 'denied' && <span style={{ color: '#dc2626' }}>Location permission denied. You can still submit using the text location.</span>}
-                        {gpsStatus === 'error' && <span style={{ color: '#dc2626' }}>Unable to get current location. You can still submit your request.</span>}
                       </div>
                     </div>
 
@@ -429,12 +407,13 @@ export const RequestHelpPage: React.FC = () => {
                       <textarea
                         id="description-input"
                         rows={4}
+                        maxLength={500}
                         value={description}
                         onChange={(e) => setDescription(e.target.value)}
                         className="form-input form-textarea"
                         placeholder="Please include details such as current road access, visible hazards, specific medical conditions, or urgency..."
                       />
-                      <small className="form-helper">Minimum 5 characters. Be clear and specific.</small>
+                      <small className="form-helper">5 to 500 characters. Be clear and specific.</small>
                     </div>
                   </div>
 
@@ -442,34 +421,19 @@ export const RequestHelpPage: React.FC = () => {
                   <div className="form-section-card">
                     <h3 className="card-heading">5. Supporting Context (Optional)</h3>
                     <div className="form-group">
-                      <label htmlFor="evidence-status-select" className="form-label">
-                        Supporting Verification Context
-                      </label>
-                      <select
-                        id="evidence-status-select"
-                        value={evidenceStatus}
-                        onChange={(e) => setEvidenceStatus(e.target.value as any)}
-                        className="form-input form-select"
-                      >
-                        <option value="none">No supporting file / Direct verbal report</option>
-                        <option value="photo">Photo available with requester</option>
-                        <option value="document">Official identity / camp document</option>
-                        <option value="other">Other contextual evidence</option>
-                      </select>
-                    </div>
-
-                    <div className="form-group">
                       <label htmlFor="evidence-note-input" className="form-label">
                         Context Note (Optional)
                       </label>
                       <textarea
                         id="evidence-note-input"
                         rows={2}
+                        maxLength={1000}
                         value={evidenceNote}
                         onChange={(e) => setEvidenceNote(e.target.value)}
                         className="form-input form-textarea"
                         placeholder="Optional notes regarding observation time, landmark details, or contact method..."
                       />
+                      <small className="form-helper">Sent as supporting text for responders to review. File upload is not available in this prototype.</small>
                     </div>
                   </div>
 
@@ -514,6 +478,11 @@ export const RequestHelpPage: React.FC = () => {
                       </div>
 
                       <div className="preview-item">
+                        <span className="preview-label">Urgency:</span>
+                        <span className="preview-val capitalize">{previewDraft.priority}</span>
+                      </div>
+
+                      <div className="preview-item">
                         <span className="preview-label">People Affected:</span>
                         <span className="preview-val">{previewDraft.people_affected}</span>
                       </div>
@@ -544,10 +513,10 @@ export const RequestHelpPage: React.FC = () => {
                         <p className="preview-desc">{previewDraft.description}</p>
                       </div>
 
-                      {previewDraft.evidence_status !== 'none' && (
+                      {previewDraft.evidence_note && (
                         <div className="preview-item">
-                          <span className="preview-label">Evidence:</span>
-                          <span className="preview-val">{previewDraft.evidence_status}</span>
+                          <span className="preview-label">Supporting context:</span>
+                          <span className="preview-val">{previewDraft.evidence_note}</span>
                         </div>
                       )}
                     </div>
@@ -574,7 +543,7 @@ export const RequestHelpPage: React.FC = () => {
                         <strong>Keep Coordinates Accurate:</strong> Help responders find you even if street signs are down.
                       </li>
                       <li>
-                        <strong>Safe Submission:</strong> Your data will only be seen by authorized aid coordinators.
+                        <strong>Demo Data:</strong> Use synthetic details in this hackathon prototype. Request IDs are public tracking references.
                       </li>
                     </ul>
 

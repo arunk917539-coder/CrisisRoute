@@ -3,9 +3,58 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+async function importSource(relativePath, env = {}) {
+  const source = fs.readFileSync(path.join(__dirname, relativePath), 'utf8')
+    .replaceAll('import.meta.env', JSON.stringify(env));
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } });
+  return import(`data:text/javascript;base64,${Buffer.from(compiled.outputText).toString('base64')}`);
+}
+
+test('Tracking handles UTC timestamps with and without explicit offsets', async () => {
+  const { formatTimestamp } = await importSource('src/utils/publicRequest.ts');
+  const expected = new Date('2026-09-29T10:00:00Z').toLocaleString();
+  assert.equal(formatTimestamp('2026-09-29T10:00:00'), expected);
+  assert.equal(formatTimestamp('2026-09-29T10:00:00+00:00'), expected);
+  assert.equal(formatTimestamp('2026-09-29T15:30:00+05:30'), expected);
+  assert.equal(formatTimestamp('invalid'), 'Not yet available');
+});
+
+test('Leaflet popup text cannot introduce markup from a location address', async () => {
+  const { escapeHtml } = await importSource('src/utils/publicRequest.ts');
+  assert.equal(escapeHtml('<img src=x onerror="alert(1)"> & camp'), '&lt;img src=x onerror=&quot;alert(1)&quot;&gt; &amp; camp');
+});
+
+test('Public API uses same-origin proxy by default and sends coordinates and supporting text', async () => {
+  const { API_BASE_URL, createPublicReport, getPublicRequest } = await importSource('src/services/api.ts');
+  assert.equal(API_BASE_URL, '/api');
+  const originalFetch = globalThis.fetch;
+  const payload = { report_type: 'relief', category: 'water', description: 'Synthetic camp needs drinking water', location: 'Demo camp', latitude: 12.9141, longitude: 74.856, people_affected: 10, required_quantity: 100, priority: 'high', evidence_note: 'Field observer reports 10 households.' };
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ request_id: 'CR-42', status: 'under_review' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const result = await createPublicReport(payload);
+    assert.equal(result.success, true);
+    assert.equal(result.request.request_id, 'CR-42');
+    assert.equal(calls[0].url, '/api/public/reports');
+    assert.deepEqual(JSON.parse(calls[0].options.body), payload);
+    await getPublicRequest('CR-42');
+    assert.equal(calls[1].url, '/api/public/requests/CR-42');
+    globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+    const unavailable = await getPublicRequest('CR-42');
+    assert.equal(unavailable.success, false);
+    assert.match(unavailable.errorMessage, /Unable to reach the server/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 // ─── 1. Coordinate Formatting ────────────────────────────────────────────────
 test('Coordinate formatting handles positive and negative lat/long correctly', () => {
