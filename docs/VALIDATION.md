@@ -57,4 +57,4 @@ Original `backend/crisisroute.db` SHA256 before and after validation:
 - Internet-backed route/landmark services are retained but were not exercised end-to-end in this validation. They are optional references and cannot establish disaster-route safety.
 - Photo storage, live responder/vehicle tracking and verified shelters are unsupported. Reconciliation is offline lexical/rule assistance, with human decisions and deterministic quantities.
 - Proposal/checkpoint files listed in the master prompt were not present in this checkout, so their additional requirements could not be independently assessed.
-- Git checkpoints are local on `codex/demo-integration`. Push was blocked by automatic approval review because the configured GitHub destination's trust/ownership was not established. No remote push is claimed.
+- Git checkpoints were pushed to `codex/demo-integration` at `https://github.com/arunk917539-coder/CrisisRoute` on 2 October 2026 after the user explicitly confirmed the destination and approved the push.
