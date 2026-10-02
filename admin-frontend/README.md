@@ -1,32 +1,9 @@
-# React + TypeScript + Vite
+# CrisisRoute responder portal
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + TypeScript + Vite with Leaflet maps. Uses the real backend for reports, evidence review, relationship decisions, report verification, needs, resources, allocations, deliveries and audit history.
 
-Currently, two official plugins are available:
+From the repository root run `scripts/Start-CrisisRoute.ps1 -Service admin`. On a second PC append `-BackendUrl http://BACKEND_LAN_IP:8000`.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+For direct npm startup, first run `cd admin-frontend` from the repository root. Copy `.env.example` to `.env`, configure `CRISISROUTE_API_TARGET`, and run `npm run dev`. Keep `VITE_API_BASE_URL=/api`. Port 5174 is strict; startup fails clearly if occupied.
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
-```
-
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+See [the shared runbook](../docs/DEMO_RUNBOOK.md) and [validation results](../docs/VALIDATION.md).
