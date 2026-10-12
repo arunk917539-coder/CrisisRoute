@@ -1,14 +1,38 @@
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL?.trim() || '/api').replace(/\/+$/, '')
+export const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL?.trim() || '/api').replace(/\/+$/, '')
+const SESSION_KEY = 'crisisroute.responder.session'
+let sessionToken: string | null = null
+try { sessionToken = sessionStorage.getItem(SESSION_KEY) } catch { /* In-memory sessions work when browser storage is disabled. */ }
+
+export function setSessionToken(token: string | null) {
+  sessionToken = token
+  try { if (token) sessionStorage.setItem(SESSION_KEY, token); else sessionStorage.removeItem(SESSION_KEY) } catch { /* Keep the in-memory session. */ }
+}
+export function hasSessionToken() { return Boolean(sessionToken) }
+export class ApiError extends Error {
+  status: number
+  constructor(message: string, status: number) { super(message); this.status = status }
+}
 
 export async function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const response = await fetch(url, { ...init, signal: init.signal ?? AbortSignal.timeout(12000) })
+  const target = new URL(url, window.location.origin)
+  const backend = new URL(API_BASE_URL, window.location.origin)
+  const isBackend = target.origin === backend.origin && (target.pathname === backend.pathname || target.pathname.startsWith(`${backend.pathname.replace(/\/+$/, '')}/`))
+  const headers = new Headers(init.headers)
+  const requestToken = sessionToken
+  // Route and map providers must never receive responder credentials.
+  if (isBackend && requestToken) headers.set('Authorization', `Bearer ${requestToken}`)
+  const response = await fetch(url, { ...init, headers, signal: init.signal ?? AbortSignal.timeout(12000) })
+  if (isBackend && response.status === 401 && requestToken && requestToken === sessionToken) {
+    setSessionToken(null)
+    window.dispatchEvent(new Event('crisisroute:session-expired'))
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => null)
     const detail = body?.detail
     const message = typeof detail === 'string' ? detail : Array.isArray(detail)
       ? detail.map((entry: { msg?: string }) => entry.msg || 'Invalid input').join('; ')
       : `Server returned ${response.status}`
-    throw new Error(message)
+    throw new ApiError(message, response.status)
   }
   return response
 }

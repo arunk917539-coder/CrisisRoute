@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
-import { API_BASE_URL, apiFetch, displayTime, resourceCategory } from './api'
+import { API_BASE_URL, ApiError, apiFetch, displayTime, resourceCategory } from './api'
 import { OperationalMap } from './components/OperationalMap'
+import { AuthGate } from './components/AuthGate'
+import type { ResponderUser } from './components/AuthGate'
+import { IncidentWorkspace } from './components/IncidentWorkspace'
+import { ReportCollaboration } from './components/ReportCollaboration'
+import { evidenceSnapshotMatches } from './evidenceReview'
+import type { EvidenceSnapshotState } from './evidenceReview'
 
 interface HealthResponse {
   status: string
@@ -34,6 +40,7 @@ interface Report {
   reviewed_at?: string | null
   review_note?: string
   evidence_reviewed?: boolean
+  can_contact_citizen?: boolean
   evidence?: { status: string; source: string; note: string; freshness: string; observed_at: string | null }
 }
 
@@ -62,6 +69,7 @@ interface EvidenceResponse {
   freshness: string
   human_review_required: boolean
   reviewed?: boolean
+  evidence_version: string | null
 }
 
 interface Resource {
@@ -112,15 +120,13 @@ interface Relationship {
   similarity: number
   decision: string
 }
-interface AuditEvent {
-  id: number
-  entity_type: string
-  entity_id: number
-  summary: string
-  created_at: string
+interface AuditEvent { id: number; summary: string; created_at: string }
+function App() {
+  return <AuthGate>{(user, logout) => <ResponderDashboard user={user} logout={logout} />}</AuthGate>
 }
 
-function App() {
+function ResponderDashboard({ user, logout }: { user: ResponderUser; logout: () => Promise<void> }) {
+  const canEdit = user.role !== 'viewer'
   const [connectionState, setConnectionState] = useState<ConnectionState>('loading')
   const [mapRefreshKey, setMapRefreshKey] = useState<number>(0)
   const [healthData, setHealthData] = useState<HealthResponse | null>(null)
@@ -142,6 +148,7 @@ function App() {
   const [evidenceState, setEvidenceState] = useState<ConnectionState>('loading')
   const [evidenceData, setEvidenceData] = useState<EvidenceResponse | null>(null)
   const [evidenceError, setEvidenceError] = useState<string>('')
+  const [evidenceSnapshot, setEvidenceSnapshot] = useState<EvidenceSnapshotState | null>(null)
 
   const [submittingDecisionId, setSubmittingDecisionId] = useState<number | null>(null)
   const [failedDecisionId, setFailedDecisionId] = useState<number | null>(null)
@@ -167,6 +174,9 @@ function App() {
   const refreshSequence = useRef(0)
   const refreshInFlight = useRef(false)
   const selectedReportId = useRef<number | null>(null)
+  const handleEvidenceSnapshot = useCallback((snapshot: EvidenceSnapshotState) => {
+    if (selectedReportId.current === snapshot.reportId) setEvidenceSnapshot(snapshot)
+  }, [])
   const reportDialog = useRef<HTMLDivElement>(null)
   const [needQuantity, setNeedQuantity] = useState<number | ''>('')
   const [creatingNeed, setCreatingNeed] = useState<boolean>(false)
@@ -312,6 +322,7 @@ function App() {
   const handleRetry = () => { void handleRefreshData() }
 
   const submitDecision = async (id: number, decision: 'accept' | 'reject' | 'unresolved') => {
+    if (!canEdit) return
     setSubmittingDecisionId(id)
     setFailedDecisionId(null)
     setDecisionError('')
@@ -338,25 +349,38 @@ function App() {
   }
 
   const submitEvidenceReview = async (reportId: number) => {
+    if (!canEdit || !evidenceData || !evidenceSnapshotMatches(evidenceSnapshot, reportId, evidenceData.evidence_version)) return
+    const displayedVersion = evidenceSnapshot!.version
     setReviewingEvidenceId(reportId)
     setEvidenceReviewError('')
     setEvidenceReviewSuccess('')
     try {
-      await apiFetch(`${API_BASE_URL}/reports/${reportId}/evidence/review`, { method: 'POST' })
+      await apiFetch(`${API_BASE_URL}/reports/${reportId}/evidence/review`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ evidence_version: displayedVersion }) })
       if (selectedReportId.current === reportId) {
         setEvidenceReviewSuccess('Evidence review recorded. Make your operational decision below.')
         setSelectedReport(previous => previous?.id === reportId ? { ...previous, evidence_reviewed: true } : previous)
-        setEvidenceData(previous => previous?.report_id === reportId ? { ...previous, reviewed: true, human_review_required: false } : previous)
+        setEvidenceData(previous => previous?.report_id === reportId && previous.evidence_version === displayedVersion ? { ...previous, reviewed: true, human_review_required: false } : previous)
       }
       await handleRefreshData()
     } catch (err) {
-      if (selectedReportId.current === reportId) setEvidenceReviewError(err instanceof Error ? err.message : 'Failed to submit evidence review')
+      if (selectedReportId.current === reportId) {
+        setEvidenceReviewError(err instanceof Error ? err.message : 'Failed to submit evidence review')
+        if (err instanceof ApiError && err.status === 409) {
+          setEvidenceSnapshot(null)
+          setEvidenceReviewSuccess('')
+          await handleRefreshData()
+        }
+      }
     } finally { setReviewingEvidenceId(null) }
   }
 
   const submitReportReview = async (decision: 'accept' | 'reject' | 'unresolved') => {
-    if (!selectedReport) return
+    if (!selectedReport || !canEdit) return
     const reportId = selectedReport.id
+    if (decision === 'accept' && !(evidenceState === 'connected' && evidenceData?.report_id === reportId && evidenceData.reviewed && evidenceSnapshotMatches(evidenceSnapshot, reportId, evidenceData.evidence_version))) {
+      setNeedError('Load and review the current replies and photos before accepting this report.')
+      return
+    }
     if (decision === 'accept' && selectedReport.report_type === 'relief' && (needQuantity === '' || !Number.isFinite(needQuantity) || needQuantity <= 0 || needQuantity > selectedReport.required_quantity || !needUnit.trim())) {
       setNeedError('Enter a positive verified quantity no greater than the request, and a unit.')
       return
@@ -382,6 +406,7 @@ function App() {
 
   const submitResource = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!canEdit) return
     if (newResource.available_quantity === '' || !Number.isFinite(newResource.available_quantity) || newResource.available_quantity <= 0) {
       setAddResourceError('Available quantity must be greater than 0')
       return
@@ -435,6 +460,7 @@ function App() {
 
   const submitAllocation = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!canEdit) return
     if (allocNeedId === '' || allocResourceId === '' || allocQuantity === '' || !Number.isFinite(allocQuantity) || allocQuantity <= 0) {
       setAllocError('Please fill out all fields correctly. Quantity must be > 0.')
       return
@@ -503,6 +529,7 @@ function App() {
 
   const submitDelivery = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!canEdit) return
     if (deliveryNeedId === '' || deliveryQuantity === '' || !Number.isFinite(deliveryQuantity) || deliveryQuantity <= 0) {
       setDeliveryError('Please fill out all required fields correctly. Quantity must be > 0.')
       return
@@ -584,6 +611,7 @@ function App() {
     setEvidenceState('loading')
     setEvidenceError('')
     setEvidenceData(null)
+    setEvidenceSnapshot(null)
     setEvidenceReviewError('')
     setEvidenceReviewSuccess('')
     setNeedQuantity(fullReport.required_quantity)
@@ -609,11 +637,6 @@ function App() {
   ).sort((a, b) => (priorityRank[b.priority ?? 'medium'] ?? 0) - (priorityRank[a.priority ?? 'medium'] ?? 0) || b.id - a.id)
   const selectedRelationships = selectedReport ? relationships.filter(item => item.report_a_id === selectedReport.id || item.report_b_id === selectedReport.id) : []
   const selectedNeed = selectedReport ? coverage.find(need => need.report_id === selectedReport.id) : undefined
-  const selectedAudit = selectedReport ? auditEvents.filter(event =>
-    (event.entity_type === 'report' && event.entity_id === selectedReport.id) ||
-    (event.entity_type === 'need' && event.entity_id === selectedNeed?.need_id) ||
-    (event.entity_type === 'relationship' && selectedRelationships.some(item => item.id === event.entity_id))
-  ) : []
   const allocationNeed = coverage.find(need => need.need_id === allocNeedId)
   const allocationCategory = reports.find(report => report.id === allocationNeed?.report_id)?.category
   const matchingResources = resources.filter(resource => resource.status === 'active' && resource.available_quantity > 0 &&
@@ -644,9 +667,12 @@ function App() {
             <span className="brand-subtitle">Responder Command Center</span>
           </div>
         </div>
+        <div className="session-controls"><span>{user.display_name}<small>{user.role}</small></span><button className="btn-open-report" onClick={() => void logout()}>Sign out</button></div>
       </header>
 
       <main className="main-content">
+        {!canEdit && <p className="viewer-notice">Viewer access: you can inspect reports and operations. A responder or administrator must record changes.</p>}
+        <IncidentWorkspace user={user} refreshKey={mapRefreshKey} onChanged={() => void handleRefreshData()} onOpenReport={id => { const report = reports.find(item => item.id === id); if (report) handleOpenReport(report) }} />
         <h2 className="section-title">System Status</h2>
         <div className="status-card">
           <div className="card-header">
@@ -842,14 +868,14 @@ function App() {
                       <button 
                         className="btn-action confirm" 
                         onClick={() => submitDecision(item.relationship_id, confirmAction.decision)}
-                        disabled={submittingDecisionId === item.relationship_id}
+                        disabled={!canEdit || submittingDecisionId === item.relationship_id}
                       >
                         {submittingDecisionId === item.relationship_id ? 'Submitting...' : 'Yes, Confirm'}
                       </button>
                       <button 
                         className="btn-action unresolved" 
                         onClick={() => setConfirmAction(null)}
-                        disabled={submittingDecisionId === item.relationship_id}
+                        disabled={!canEdit || submittingDecisionId === item.relationship_id}
                       >
                         Cancel
                       </button>
@@ -860,21 +886,21 @@ function App() {
                     <button 
                       className="btn-action confirm" 
                       onClick={() => setConfirmAction({ id: item.relationship_id, decision: 'accept', label: 'Accept Relationship' })}
-                      disabled={submittingDecisionId === item.relationship_id}
+                      disabled={!canEdit || submittingDecisionId === item.relationship_id}
                     >
                       Accept Relationship
                     </button>
                     <button 
                       className="btn-action reject"
                       onClick={() => setConfirmAction({ id: item.relationship_id, decision: 'reject', label: 'Reject Relationship' })}
-                      disabled={submittingDecisionId === item.relationship_id}
+                      disabled={!canEdit || submittingDecisionId === item.relationship_id}
                     >
                       Reject Relationship
                     </button>
                     <button 
                       className="btn-action unresolved"
                       onClick={() => submitDecision(item.relationship_id, 'unresolved')}
-                      disabled={submittingDecisionId === item.relationship_id}
+                      disabled={!canEdit || submittingDecisionId === item.relationship_id}
                     >
                       Keep Unresolved
                     </button>
@@ -978,7 +1004,7 @@ function App() {
                 </div>
               </div>
               <div className="report-body">
-                <form onSubmit={submitResource} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <form onSubmit={submitResource} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}><fieldset className="role-guard" disabled={!canEdit}>
                   <label className="inventory-label">Resource name<input type="text" placeholder="Water bottles" value={newResource.name} onChange={e => setNewResource({...newResource, name: e.target.value})} required minLength={2} className="input-field" /></label>
                   <label className="inventory-label">Resource type<input type="text" placeholder="Drinking Water, Food, Medical…" value={newResource.resource_type} onChange={e => setNewResource({...newResource, resource_type: e.target.value})} required minLength={2} className="input-field" /></label>
                   <label className="inventory-label">Resource unit<input type="text" placeholder="litres, meals, units…" value={newResource.unit} onChange={e => setNewResource({...newResource, unit: e.target.value})} required minLength={1} className="input-field" /></label>
@@ -989,10 +1015,10 @@ function App() {
                   <label className="inventory-label">Resource source<input type="text" placeholder="Warehouse A" value={newResource.source} onChange={e => setNewResource({...newResource, source: e.target.value})} required minLength={2} className="input-field" /></label>
                   {addResourceError && <div className="error-state" style={{ padding: '0.5rem', margin: 0 }}>{addResourceError}</div>}
                   {addResourceSuccess && <div className="success-message" style={{ padding: '0.5rem', margin: 0 }}>{addResourceSuccess}</div>}
-                  <button type="submit" className="btn-action confirm" disabled={addingResource}>
+                  <button type="submit" className="btn-action confirm" disabled={!canEdit || addingResource}>
                     {addingResource ? 'Adding...' : 'Add Resource'}
                   </button>
-                </form>
+                </fieldset></form>
               </div>
             </div>
 
@@ -1124,7 +1150,7 @@ function App() {
         <div className="reports-grid">
           <div className="report-card" style={{ gridColumn: '1 / -1', border: '1px solid #10b981' }}>
             <div className="report-body">
-              <form onSubmit={submitAllocation} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', alignItems: 'end' }}>
+              <form onSubmit={submitAllocation} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', alignItems: 'end' }}><fieldset className="role-guard" disabled={!canEdit}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <label className="report-meta-label" htmlFor="allocation-need">Need to allocate</label>
                   <select id="allocation-need" className="input-field" value={allocNeedId} onChange={e => {
@@ -1156,11 +1182,11 @@ function App() {
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  <button type="submit" className="btn-action confirm" style={{ backgroundColor: '#10b981' }} disabled={allocatingState}>
+                  <button type="submit" className="btn-action confirm" style={{ backgroundColor: '#10b981' }} disabled={!canEdit || allocatingState}>
                     {allocatingState ? 'Allocating...' : 'Allocate'}
                   </button>
                 </div>
-              </form>
+              </fieldset></form>
               
               {allocError && <div className="error-state" style={{ marginTop: '1rem', marginBottom: 0 }}>{allocError}</div>}
               {allocSuccess && <div className="success-message" style={{ marginTop: '1rem', marginBottom: 0 }}>{allocSuccess}</div>}
@@ -1174,7 +1200,7 @@ function App() {
         <div className="reports-grid">
           <div className="report-card" style={{ gridColumn: '1 / -1', border: '1px solid #3b82f6' }}>
             <div className="report-body">
-              <form onSubmit={submitDelivery} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', alignItems: 'end' }}>
+              <form onSubmit={submitDelivery} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', alignItems: 'end' }}><fieldset className="role-guard" disabled={!canEdit}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <label className="report-meta-label" htmlFor="delivery-need">Need receiving delivery</label>
                   <select id="delivery-need" className="input-field" value={deliveryNeedId} onChange={e => {
@@ -1206,11 +1232,11 @@ function App() {
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  <button type="submit" className="btn-action confirm" style={{ backgroundColor: '#3b82f6' }} disabled={deliveringState}>
+                  <button type="submit" className="btn-action confirm" style={{ backgroundColor: '#3b82f6' }} disabled={!canEdit || deliveringState}>
                     {deliveringState ? 'Recording...' : 'Record Delivery'}
                   </button>
                 </div>
-              </form>
+              </fieldset></form>
               
               {deliveryError && <div className="error-state" style={{ marginTop: '1rem', marginBottom: 0 }}>{deliveryError}</div>}
               {deliverySuccess && <div className="success-message" style={{ marginTop: '1rem', marginBottom: 0 }}>{deliverySuccess}</div>}
@@ -1369,10 +1395,11 @@ function App() {
                     <button 
                       className="btn-action confirm" 
                       onClick={() => submitEvidenceReview(evidenceData.report_id)}
-                      disabled={reviewingEvidenceId === evidenceData.report_id || !evidenceData.human_review_required}
+                      disabled={!canEdit || reviewingEvidenceId === evidenceData.report_id || !evidenceData.human_review_required || !evidenceSnapshotMatches(evidenceSnapshot, evidenceData.report_id, evidenceData.evidence_version)}
                     >
                       {reviewingEvidenceId === evidenceData.report_id ? 'Submitting...' : evidenceData.human_review_required ? 'Mark Evidence as Reviewed' : 'Evidence Review Recorded'}
                     </button>
+                    {evidenceData.human_review_required && !evidenceSnapshotMatches(evidenceSnapshot, evidenceData.report_id, evidenceData.evidence_version) && <p className="warning-note">Wait for the current replies and all photos below to load before recording an evidence review.</p>}
                   </div>
                 )}
               </div>
@@ -1397,26 +1424,21 @@ function App() {
                 <p>Review the evidence and related reports, then record your decision. Only a responder can verify this report.</p>
                 {selectedReport.reviewed_at && <p>Last decision: {displayTime(selectedReport.reviewed_at)} · {selectedReport.review_note || 'No note provided'}</p>}
                 {selectedNeed ? <div className="success-message">Verified Need #{selectedNeed.need_id}: {selectedNeed.verified_quantity} {selectedNeed.unit} required · {selectedNeed.delivered_quantity} delivered · {selectedNeed.uncovered_quantity} uncovered ({selectedNeed.coverage_percent}% covered).</div> : selectedReport.verification_status === 'verified' ? <p className="success-message">Report verified by a responder.</p> : <>
-                  <label className="review-label">Decision note<textarea className="input-field" maxLength={1000} value={reviewNote} onChange={event => setReviewNote(event.target.value)} placeholder="Record the reason for your decision" /></label>
+                  <label className="review-label">Decision note<textarea className="input-field" disabled={!canEdit} maxLength={1000} value={reviewNote} onChange={event => setReviewNote(event.target.value)} placeholder="Record the reason for your decision" /></label>
                   {selectedReport.report_type === 'relief' && <div className="report-filters">
-                    <label>Verified quantity<input className="input-field" type="number" step="any" min="0.01" max={selectedReport.required_quantity} value={needQuantity} onChange={event => setNeedQuantity(event.target.value === '' ? '' : Number(event.target.value))} /></label>
-                    <label>Unit<input className="input-field" maxLength={40} value={needUnit} onChange={event => setNeedUnit(event.target.value)} placeholder="units, litres, meals…" /></label>
+                    <label>Verified quantity<input className="input-field" type="number" step="any" min="0.01" max={selectedReport.required_quantity} disabled={!canEdit} value={needQuantity} onChange={event => setNeedQuantity(event.target.value === '' ? '' : Number(event.target.value))} /></label>
+                    <label>Unit<input className="input-field" maxLength={40} disabled={!canEdit} value={needUnit} onChange={event => setNeedUnit(event.target.value)} placeholder="units, litres, meals…" /></label>
                   </div>}
-                  {!selectedReport.evidence_reviewed && !evidenceData?.reviewed && <p className="warning-note">Record an explicit evidence review before accepting.</p>}
+                  {!(evidenceState === 'connected' && evidenceData?.reviewed && evidenceSnapshotMatches(evidenceSnapshot, selectedReport.id, evidenceData.evidence_version)) && <p className="warning-note">Load the current replies and photos, then record an explicit evidence review before accepting.</p>}
                   <div className="queue-actions">
-                    <button className="btn-action confirm" disabled={creatingNeed || (!selectedReport.evidence_reviewed && !evidenceData?.reviewed)} onClick={() => void submitReportReview('accept')}>{creatingNeed ? 'Saving…' : selectedReport.report_type === 'relief' ? 'Accept & Create Verified Need' : 'Accept & Verify Report'}</button>
-                    <button className="btn-action reject" disabled={creatingNeed} onClick={() => void submitReportReview('reject')}>Reject Report</button>
-                    <button className="btn-action unresolved" disabled={creatingNeed} onClick={() => void submitReportReview('unresolved')}>Mark Unresolved</button>
+                    <button className="btn-action confirm" disabled={!canEdit || creatingNeed || evidenceState !== 'connected' || !evidenceData?.reviewed || !evidenceSnapshotMatches(evidenceSnapshot, selectedReport.id, evidenceData?.evidence_version)} onClick={() => void submitReportReview('accept')}>{creatingNeed ? 'Saving…' : selectedReport.report_type === 'relief' ? 'Accept & Create Verified Need' : 'Accept & Verify Report'}</button>
+                    <button className="btn-action reject" disabled={!canEdit || creatingNeed} onClick={() => void submitReportReview('reject')}>Reject Report</button>
+                    <button className="btn-action unresolved" disabled={!canEdit || creatingNeed} onClick={() => void submitReportReview('unresolved')}>Mark Unresolved</button>
                   </div>
                 </>}
                 {needError && <div className="error-state" role="alert">{needError}</div>}
               </div>
-              <div className="evidence-section">
-                <h3 className="evidence-title">Recent history for this report</h3>
-                {auditError && <div className="error-state">{auditError}</div>}
-                {selectedAudit.length === 0 && <p>No matching events in the latest 100 records.</p>}
-                {selectedAudit.map(event => <p className="audit-row" key={event.id}><time>{displayTime(event.created_at)}</time> {event.summary}</p>)}
-              </div>
+              <ReportCollaboration key={selectedReport.id} reportId={selectedReport.id} canEdit={canEdit} canContactCitizen={selectedReport.can_contact_citizen === true} refreshKey={mapRefreshKey} onEvidenceSnapshot={handleEvidenceSnapshot} onChanged={() => void handleRefreshData()} onOpenReport={id => { const report = reports.find(item => item.id === id); if (report) handleOpenReport(report) }} />
 
               {needSuccess && (
                 <div className="success-message" style={{ marginTop: '1.5rem' }}>

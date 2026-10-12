@@ -37,7 +37,7 @@ export const Footer: React.FC = () => {
         <div className="footer-col">
           <h4 className="footer-heading">Safety &amp; Privacy</h4>
           <p className="footer-safety-text">
-            This is a hackathon prototype. Use synthetic details in the demo. Anyone with a request ID can view its public tracking details.
+            This is a hackathon prototype. Use synthetic details in the demo. Keep your request ID and private access key to follow updates; only share the key with people you trust.
           </p>
           <p className="footer-safety-notice">
             In imminent danger, always dial local emergency dispatch (911 / 112).

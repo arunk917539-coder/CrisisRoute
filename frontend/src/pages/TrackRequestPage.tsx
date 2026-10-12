@@ -3,6 +3,9 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { getPublicRequest } from '../services/api';
 import { PublicRequestResponse } from '../types';
 import { formatTimestamp, statusLabel, statusDescription } from '../utils/publicRequest';
+import { loadTrackingToken, saveTrackingToken } from '../utils/citizenStorage';
+import { TrackingKey } from '../components/TrackingKey';
+import { RequestUpdates } from '../components/RequestUpdates';
 
 export const TrackRequestPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -13,6 +16,12 @@ export const TrackRequestPage: React.FC = () => {
   const [refreshCount, setRefreshCount] = useState(0);
   const [lastChecked, setLastChecked] = useState<string | null>(null);
   const requestId = (searchParams.get('id') || '').trim().toUpperCase();
+  const [access, setAccess] = useState(() => ({ id: requestId, token: loadTrackingToken(requestId) }));
+  const [keyInput, setKeyInput] = useState(() => loadTrackingToken(requestId));
+  const [storageMessage, setStorageMessage] = useState('');
+  const token = access.id === requestId ? access.token : loadTrackingToken(requestId);
+
+  useEffect(() => { setKeyInput(access.id === requestId ? access.token : loadTrackingToken(requestId)); }, [requestId, access]);
 
   useEffect(() => {
     setTrackingCode(requestId);
@@ -33,13 +42,17 @@ export const TrackRequestPage: React.FC = () => {
       if (inFlight) return;
       inFlight = true;
       setIsLoading(true);
-      const result = await getPublicRequest(requestId, controller.signal);
+      const result = await getPublicRequest(requestId, controller.signal, token);
       if (!active) return;
       if (result.success && result.request) {
         setRequestData(result.request);
+        if (result.request.can_manage && token) {
+          setStorageMessage(saveTrackingToken(requestId, token) ? '' : 'The access key could not be saved on this device. Keep your own copy.');
+        }
         setErrorMsg(null);
         setLastChecked(new Date().toLocaleTimeString());
       } else {
+        if (result.needsKey) setRequestData(null);
         setErrorMsg(result.errorMessage || 'Unable to check the latest status. Retrying automatically.');
       }
       inFlight = false;
@@ -52,11 +65,14 @@ export const TrackRequestPage: React.FC = () => {
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [requestId, refreshCount]);
+  }, [requestId, refreshCount, token]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     const normalized = trackingCode.trim().toUpperCase();
+    const suppliedToken = keyInput.trim();
+    setAccess({ id: normalized, token: suppliedToken });
+    setStorageMessage('');
     if (normalized === requestId) setRefreshCount((count) => count + 1);
     else setSearchParams({ id: normalized });
   };
@@ -91,22 +107,28 @@ export const TrackRequestPage: React.FC = () => {
                 type="text"
                 placeholder="e.g. CR-1"
                 value={trackingCode}
-                onChange={(e) => setTrackingCode(e.target.value)}
+                onChange={(e) => { setTrackingCode(e.target.value); setKeyInput(loadTrackingToken(e.target.value)); }}
                 className="form-input"
               />
 
               <button
                 type="submit"
                 className="btn btn-primary"
-                disabled={isLoading || !trackingCode.trim()}
+                disabled={!trackingCode.trim()}
               >
                 {isLoading && !requestData ? 'Searching...' : 'Search Status'}
               </button>
             </div>
 
             <small className="form-helper">
-              Your tracking code is generated upon successful submission of a citizen report.
+              Your request ID and private access key are provided when your report is submitted.
             </small>
+            <div className="form-group mt-3">
+              <label className="form-label" htmlFor="tracking-key-input">Private access key</label>
+              <input id="tracking-key-input" type="password" className="form-input" value={keyInput} onChange={event => setKeyInput(event.target.value)} autoComplete="off" spellCheck={false} placeholder="Paste your saved access key" />
+              <small className="form-helper">Required for new requests. This browser fills a saved key automatically. Use your saved key on another device and keep it separate from tracking links.</small>
+            </div>
+            {storageMessage && <p role="status">{storageMessage}</p>}
           </form>
 
           {errorMsg && (
@@ -138,7 +160,7 @@ export const TrackRequestPage: React.FC = () => {
                 </p>
 
                 <div className="privacy-badge mt-4">
-                  Anyone with a request ID can view its public tracking details. Use synthetic information for the demo.
+                  Keep your access key private. Older requests without a key retain a limited, read-only status view.
                 </div>
               </div>
             </div>
@@ -235,12 +257,14 @@ export const TrackRequestPage: React.FC = () => {
                 </div>}
 
                 <div className="privacy-badge mt-4">
-                  Public tracking shows the responder's review note and delivery totals. Internal reconciliation and audit logs stay in the responder interface.
+                  {requestData.can_manage ? 'Your access key opens follow-up questions, photos, and your request timeline below.' : 'This older request has a read-only tracking view. Ask the coordinator about any corrections.'}
                 </div>
+                {requestData.can_manage && token && <TrackingKey token={token} />}
               </div>
             </div>
           )}
         </div>
+        {requestData?.can_manage && token && <RequestUpdates key={`${requestId}:${token}`} requestId={requestId} token={token} />}
 
         {/* Informative Guidance */}
         <div className="track-faq-grid">
@@ -261,7 +285,7 @@ export const TrackRequestPage: React.FC = () => {
           <div className="faq-card">
             <h4>Can I update my location?</h4>
             <p>
-              This prototype cannot edit submitted requests. Tell the coordinator your request ID and new location so they can review the change.
+              Responders can ask for more information here. Reply to their question with corrected details so they can review them; your original report stays in the history.
             </p>
           </div>
         </div>

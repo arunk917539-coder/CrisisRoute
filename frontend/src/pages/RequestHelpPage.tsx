@@ -4,7 +4,10 @@ import { useLocationContext, formatCoordinates } from '../context/LocationContex
 import { MapView } from '../components/MapView';
 import { LocationPicker } from '../components/LocationPicker';
 import { ReportType, Priority, CitizenReportDraft, PublicReportPayload } from '../types';
-import { createPublicReport } from '../services/api';
+import { createPublicReport, uploadPublicPhoto, validatePhotos } from '../services/api';
+import { clearDraft, loadDraft, saveDraft, saveTrackingToken, ReportFormDraft } from '../utils/citizenStorage';
+import { TrackingKey } from '../components/TrackingKey';
+import { useConnectionStatus } from '../hooks/useConnectionStatus';
 
 export const RequestHelpPage: React.FC = () => {
   const navigate = useNavigate();
@@ -14,17 +17,26 @@ export const RequestHelpPage: React.FC = () => {
     currentGpsCoordinates,
     gpsAccuracy,
     setSelectedCoordinates,
+    clearLocation,
   } = useLocationContext();
+  const [initialDraft] = useState(() => loadDraft());
+  const connection = useConnectionStatus();
 
   // Form State matching backend ReportCreate contract
-  const [reportType, setReportType] = useState<ReportType>('relief');
-  const [category, setCategory] = useState<string>('food');
-  const [description, setDescription] = useState<string>('');
-  const [locationText, setLocationText] = useState<string>(locationData.address);
-  const [peopleAffected, setPeopleAffected] = useState<string>('1');
-  const [requiredQuantity, setRequiredQuantity] = useState<string>('5');
-  const [priority, setPriority] = useState<Priority>('medium');
-  const [evidenceNote, setEvidenceNote] = useState<string>('');
+  const [reportType, setReportType] = useState<ReportType>(initialDraft?.form.reportType || 'relief');
+  const [category, setCategory] = useState<string>(initialDraft?.form.category || 'food');
+  const [description, setDescription] = useState<string>(initialDraft?.form.description || '');
+  const [locationText, setLocationText] = useState<string>(initialDraft?.form.locationText ?? locationData.address);
+  const [peopleAffected, setPeopleAffected] = useState<string>(initialDraft?.form.peopleAffected ?? '1');
+  const [requiredQuantity, setRequiredQuantity] = useState<string>(initialDraft?.form.requiredQuantity ?? '5');
+  const [priority, setPriority] = useState<Priority>(initialDraft?.form.priority || 'medium');
+  const [evidenceNote, setEvidenceNote] = useState<string>(initialDraft?.form.evidenceNote || '');
+  const [draftMessage, setDraftMessage] = useState(initialDraft ? 'Saved draft restored on this device. Reselect any photos.' : 'Text and your selected location are saved on this device as you type.');
+  const [photos, setPhotos] = useState<File[]>([]);
+  const [photoMessage, setPhotoMessage] = useState('');
+  const [submittedToken, setSubmittedToken] = useState('');
+  const [tokenSaved, setTokenSaved] = useState(true);
+  const photoInput = useRef<HTMLInputElement>(null);
 
   // UI state
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -32,12 +44,77 @@ export const RequestHelpPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(null);
   const submissionInFlight = useRef(false);
-  const locationWasEdited = useRef(false);
+  const locationWasEdited = useRef(!!initialDraft);
   const selectedPoint = `${locationData.coordinates.lat},${locationData.coordinates.lng}`;
   const previousPoint = useRef(selectedPoint);
+  const restoredInitialLocation = useRef(false);
+  const restoringDraftLocation = useRef(initialDraft?.form.coordinates ? {
+    point: `${initialDraft.form.coordinates.lat},${initialDraft.form.coordinates.lng}`,
+    text: initialDraft.form.locationText,
+  } : null);
+
+  useEffect(() => {
+    if (!restoredInitialLocation.current && initialDraft) {
+      restoredInitialLocation.current = true;
+      if (initialDraft.form.coordinates) {
+        previousPoint.current = `${initialDraft.form.coordinates.lat},${initialDraft.form.coordinates.lng}`;
+        setSelectedCoordinates(initialDraft.form.coordinates, 'manual', initialDraft.form.locationText || 'Saved location');
+      } else clearLocation();
+    }
+  }, [initialDraft, setSelectedCoordinates, clearLocation]);
+
+  const currentDraft: ReportFormDraft = {
+    reportType, category, description, locationText, peopleAffected, requiredQuantity, priority, evidenceNote,
+    coordinates: isCustomLocationSet ? locationData.coordinates : null,
+  };
+  const draftContent = JSON.stringify(currentDraft);
+  useEffect(() => {
+    if (submittedRequestId) return;
+    const form = JSON.parse(draftContent) as ReportFormDraft;
+    const hasContent = form.description || form.locationText || form.evidenceNote || form.coordinates || form.reportType !== 'relief' || form.category !== 'food' || form.priority !== 'medium' || form.peopleAffected !== '1' || form.requiredQuantity !== '5';
+    if (!hasContent) return;
+    const timer = window.setTimeout(() => {
+      setDraftMessage(saveDraft(form) ? 'Draft saved on this device. Photos must be reselected after a reload.' : 'This browser could not save your draft. Keep this page open or copy your details.');
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [draftContent, submittedRequestId]);
+
+  const restoreSavedDraft = () => {
+    const saved = loadDraft();
+    if (!saved) { setDraftMessage('No saved draft was found on this device.'); return; }
+    const form = saved.form;
+    setReportType(form.reportType); setCategory(form.category); setDescription(form.description);
+    setLocationText(form.locationText); setPeopleAffected(form.peopleAffected); setRequiredQuantity(form.requiredQuantity);
+    setPriority(form.priority); setEvidenceNote(form.evidenceNote); setPreviewDraft(null);
+    locationWasEdited.current = true;
+    if (form.coordinates) {
+      previousPoint.current = `${form.coordinates.lat},${form.coordinates.lng}`;
+      restoringDraftLocation.current = { point: previousPoint.current, text: form.locationText };
+      setSelectedCoordinates(form.coordinates, 'manual', form.locationText || 'Saved location');
+    } else { restoringDraftLocation.current = null; clearLocation(); }
+    setDraftMessage('Saved text and location restored. Photos are not stored in drafts.');
+  };
+
+  const clearSavedDraft = () => {
+    const cleared = clearDraft();
+    setReportType('relief'); setCategory('food'); setDescription(''); setLocationText('');
+    setPeopleAffected('1'); setRequiredQuantity('5'); setPriority('medium'); setEvidenceNote('');
+    setPhotos([]); setPhotoMessage(''); setPreviewDraft(null); setValidationError(null); clearLocation();
+    restoringDraftLocation.current = null;
+    if (photoInput.current) photoInput.current.value = '';
+    setDraftMessage(cleared ? 'Draft cleared. New details will be saved as you type.' : 'The form was cleared, but browser storage could not be cleared.');
+  };
 
   // Sync location text if locationData updates from context
   useEffect(() => {
+    if (restoringDraftLocation.current) {
+      if (selectedPoint !== restoringDraftLocation.current.point) return;
+      setLocationText(restoringDraftLocation.current.text);
+      locationWasEdited.current = true;
+      previousPoint.current = selectedPoint;
+      restoringDraftLocation.current = null;
+      return;
+    }
     if (previousPoint.current !== selectedPoint) {
       locationWasEdited.current = false;
       previousPoint.current = selectedPoint;
@@ -124,6 +201,7 @@ export const RequestHelpPage: React.FC = () => {
 
   const handleSubmitRequest = async () => {
     if (submissionInFlight.current) return;
+    if (!navigator.onLine) { setValidationError('You are offline. Save your draft and submit it yourself when connected.'); return; }
 
     const draft = validateForm();
     if (!draft) return;
@@ -150,6 +228,21 @@ export const RequestHelpPage: React.FC = () => {
 
     if (result.success) {
       setSubmittedRequestId(result.request.request_id);
+      clearDraft();
+      const token = result.request.tracking_token || '';
+      setSubmittedToken(token);
+      setTokenSaved(token ? saveTrackingToken(result.request.request_id, token) : false);
+      if (photos.length && token) {
+        setPhotoMessage('Your request is saved. Uploading selected photos…');
+        let uploaded = 0;
+        const failures: string[] = [];
+        for (const photo of photos) {
+          const upload = await uploadPublicPhoto(result.request.request_id, token, photo);
+          if (upload.success) uploaded += 1;
+          else failures.push(`${photo.name}: ${upload.errorMessage}`);
+        }
+        setPhotoMessage(`${uploaded} of ${photos.length} photos uploaded.${failures.length ? ` ${failures.join(' ')} Open tracking to see uploaded photos and retry any missing images. Do not submit another request.` : ''}`);
+      }
     } else {
       setValidationError(result.errorMessage);
     }
@@ -182,8 +275,10 @@ export const RequestHelpPage: React.FC = () => {
             </div>
 
             <p style={{ fontSize: '14px', color: 'var(--slate-500)', marginBottom: '32px' }}>
-              Please save this ID to follow review and delivery updates. Tracking refreshes every five seconds.
+              Save this ID and the access key below to follow review and delivery updates. Tracking refreshes every five seconds.
             </p>
+            {submittedToken && <TrackingKey token={submittedToken} saved={tokenSaved} />}
+            {photoMessage && <p className="alert mt-3" role="status">{photoMessage}</p>}
 
             <div className="preview-actions" style={{ display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
               <button
@@ -208,6 +303,17 @@ export const RequestHelpPage: React.FC = () => {
                 and coordinate field response.
               </p>
             </div>
+
+            <section className="draft-panel" aria-label="Offline draft controls">
+              <div className={`connection-pill connection-${connection}`} role="status">{connection === 'online' ? 'Connected to the server' : connection === 'offline' ? 'Device offline' : connection === 'unreachable' ? 'Server unavailable' : 'Checking connection…'}</div>
+              <p role="status">{draftMessage}</p>
+              <p className="form-helper">Drafts stay in this browser on this device. Photos are not saved. Nothing is submitted automatically when you reconnect. Clear a draft on shared devices when finished.</p>
+              <div className="feature-actions">
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDraftMessage(saveDraft(currentDraft) ? 'Draft saved now on this device.' : 'This browser could not save the draft.')}>Save draft</button>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={restoreSavedDraft}>Restore saved draft</button>
+                <button type="button" className="btn btn-outline btn-sm" onClick={clearSavedDraft}>Clear draft and form</button>
+              </div>
+            </section>
 
             <div className="request-grid">
               {/* Main Request Form */}
@@ -433,7 +539,18 @@ export const RequestHelpPage: React.FC = () => {
                         className="form-input form-textarea"
                         placeholder="Optional notes regarding observation time, landmark details, or contact method..."
                       />
-                      <small className="form-helper">Sent as supporting text for responders to review. File upload is not available in this prototype.</small>
+                      <small className="form-helper">Sent as supporting text for responders to review.</small>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="report-photos">Supporting photos (optional)</label>
+                      <input id="report-photos" ref={photoInput} className="form-input" type="file" accept="image/jpeg,image/png" multiple onChange={event => {
+                        const selected = Array.from(event.target.files || []);
+                        const error = validatePhotos(selected);
+                        if (error) { setPhotoMessage(error); setPhotos([]); event.target.value = ''; }
+                        else { setPhotos(selected); setPhotoMessage(selected.length ? `${selected.length} photos selected.` : ''); }
+                      }} />
+                      <small className="form-helper">Up to 3 JPEG/PNG images, 3 MB each. Photos support human review and do not prove a claim. Only attach images you intend responders and holders of your access key to see. Reselect photos if you reload a draft.</small>
+                      {photoMessage && <p role="status">{photoMessage}</p>}
                     </div>
                   </div>
 
@@ -543,7 +660,7 @@ export const RequestHelpPage: React.FC = () => {
                         <strong>Keep Coordinates Accurate:</strong> Help responders find you even if street signs are down.
                       </li>
                       <li>
-                        <strong>Demo Data:</strong> Use synthetic details in this hackathon prototype. Request IDs are public tracking references.
+                        <strong>Keep Your Access Key:</strong> Save it with your request ID after submission to track updates and answer responders securely.
                       </li>
                     </ul>
 

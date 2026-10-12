@@ -8,6 +8,86 @@ import ts from 'typescript';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function memoryStorage() {
+  const values = new Map();
+  return { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
+}
+
+test('Offline drafts round-trip incomplete text fields and exact coordinates, then clear', async () => {
+  const { saveDraft, loadDraft, clearDraft } = await importSource('src/utils/citizenStorage.ts');
+  const storage = memoryStorage();
+  const form = { reportType: 'relief', category: 'water', description: 'Draft before reconnecting', locationText: 'Camp Alpha', peopleAffected: '', requiredQuantity: '2.5', priority: 'high', evidenceNote: 'Observed this morning', coordinates: { lat: 12.9716, lng: 77.5946 } };
+  assert.equal(saveDraft(form, storage), true);
+  assert.deepEqual(loadDraft(storage).form, form);
+  assert.ok(Number.isFinite(Date.parse(loadDraft(storage).savedAt)));
+  assert.equal(clearDraft(storage), true);
+  assert.equal(loadDraft(storage), null);
+});
+
+test('Draft reader rejects corrupt or incompatible data and storage failures are handled', async () => {
+  const { DRAFT_STORAGE_KEY, saveDraft, loadDraft, clearDraft } = await importSource('src/utils/citizenStorage.ts');
+  const storage = memoryStorage();
+  for (const raw of ['{bad json', 'null', JSON.stringify({ version: 2, form: {} }), JSON.stringify({ version: 1, savedAt: new Date().toISOString(), form: { reportType: 'relief', priority: 'medium' } })]) {
+    storage.setItem(DRAFT_STORAGE_KEY, raw);
+    assert.equal(loadDraft(storage), null);
+  }
+  const blocked = { getItem() { throw new Error('Unavailable'); }, setItem() { throw new Error('Quota'); }, removeItem() { throw new Error('Unavailable'); } };
+  assert.equal(loadDraft(blocked), null);
+  assert.equal(saveDraft({}, blocked), false);
+  assert.equal(clearDraft(blocked), false);
+});
+
+test('Tracking keys are kept separately per request and may be removed', async () => {
+  const { saveTrackingToken, loadTrackingToken } = await importSource('src/utils/citizenStorage.ts');
+  const storage = memoryStorage();
+  assert.equal(saveTrackingToken('cr-1', ' first-key ', storage), true);
+  assert.equal(saveTrackingToken('CR-2', 'second-key', storage), true);
+  assert.equal(loadTrackingToken('CR-1', storage), 'first-key');
+  assert.equal(loadTrackingToken('cr-2', storage), 'second-key');
+  assert.equal(loadTrackingToken('CR-3', storage), '');
+  assert.equal(saveTrackingToken('invalid', 'secret', storage), false);
+  saveTrackingToken('CR-1', '', storage);
+  assert.equal(loadTrackingToken('CR-1', storage), '');
+  assert.equal(loadTrackingToken('CR-2', storage), 'second-key');
+});
+
+test('Private request actions send access keys only in headers and handle access denial', async () => {
+  const { getPublicRequest, getPublicQuestions, replyToQuestion, getPublicPhotoContent } = await importSource('src/services/api.ts');
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify(url.endsWith('/questions') ? [] : { request_id: 'CR-2' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    await getPublicRequest('CR-2', undefined, 'secret-value');
+    await getPublicQuestions('CR-2', 'secret-value');
+    await replyToQuestion('CR-2', 'secret-value', 7, 'Water needed near east gate');
+    await getPublicPhotoContent('CR-2', 'secret-value', 3);
+    assert.equal(calls.length, 4);
+    for (const call of calls) {
+      assert.equal(call.options.headers['X-Tracking-Token'], 'secret-value');
+      assert.equal(call.url.includes('secret-value'), false);
+    }
+    assert.deepEqual(JSON.parse(calls[2].options.body), { question_id: 7, answer: 'Water needed near east gate' });
+    globalThis.fetch = async () => new Response('{}', { status: 403 });
+    const denied = await getPublicRequest('CR-2', undefined, 'wrong-key');
+    assert.equal(denied.success, false);
+    assert.equal(denied.needsKey, true);
+    assert.match(denied.errorMessage, /private access key/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('Photo selection enforces JPEG/PNG size and total request count before upload', async () => {
+  const { validatePhotos } = await importSource('src/services/api.ts');
+  const photo = { name: 'field.png', type: 'image/png', size: 3 * 1024 * 1024 };
+  assert.equal(validatePhotos([photo], 2), null);
+  assert.match(validatePhotos([photo], 3), /up to 3/);
+  assert.match(validatePhotos([{ ...photo, size: photo.size + 1 }]), /3 MB/);
+  assert.match(validatePhotos([{ ...photo, type: 'image/svg+xml' }]), /JPEG or PNG/);
+  assert.match(validatePhotos([{ ...photo, size: 0 }]), /1 byte/);
+});
+
 async function importSource(relativePath, env = {}) {
   const source = fs.readFileSync(path.join(__dirname, relativePath), 'utf8')
     .replaceAll('import.meta.env', JSON.stringify(env));

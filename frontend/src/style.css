@@ -2201,3 +2201,29 @@ Wait, .status-badge just has capitalize. Let's make it look solid. */
     padding: 20px !important;
   }
 }
+/* Request continuity, citizen follow-up, and evidence. */
+.draft-panel, .access-key-card {
+  padding: 20px;
+  margin: 20px 0;
+  border: 1px solid var(--slate-200);
+  border-radius: 12px;
+  background: #f8fafc;
+  text-align: left;
+}
+.draft-panel p, .access-key-card p { margin: 10px 0; }
+.feature-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.connection-pill { display: inline-block; font-size: 13px; font-weight: 700; padding: 5px 10px; border-radius: 20px; background: #e2e8f0; color: #334155; }
+.connection-online { background: #dcfce7; color: #166534; }
+.connection-offline, .connection-unreachable { background: #fef3c7; color: #92400e; }
+.request-updates { margin-top: 24px; }
+.request-updates .form-section-card { margin-bottom: 20px; }
+.question-card { border-top: 1px solid var(--slate-200); padding-top: 16px; margin-top: 16px; overflow-wrap: anywhere; }
+.answered-question { border-left: 3px solid #22c55e; background: #f0fdf4; padding: 12px; margin: 12px 0; }
+.answered-question p { white-space: pre-wrap; }
+.evidence-gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+.evidence-photo { margin: 12px 0; min-width: 0; }
+.evidence-photo img { width: 100%; height: 170px; object-fit: contain; border-radius: 8px; background: #f1f5f9; }
+.evidence-photo figcaption { font-size: 12px; color: #475569; margin-top: 6px; overflow-wrap: anywhere; }
+.request-timeline { padding-left: 24px; margin: 16px 0; }
+.request-timeline li { border-left: 2px solid #cbd5e1; padding: 0 0 20px 16px; overflow-wrap: anywhere; }
+.access-key-card input { font-family: monospace; }

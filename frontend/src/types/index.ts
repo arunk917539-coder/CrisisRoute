@@ -80,6 +80,8 @@ export interface PublicCoverage {
  * Internal reconciliation, evidence, audit fields are intentionally absent.
  */
 export interface PublicRequestResponse {
+  tracking_token?: string; // Returned only when the request is created.
+  can_manage?: boolean;
   request_id: string;        // e.g. "CR-1" — format: "CR-{report_id}"
   status: PublicRequestStatus;
   report_type: ReportType;
@@ -96,6 +98,31 @@ export interface PublicRequestResponse {
   updated_at: string | null;
   review_note: string | null;
   coverage: PublicCoverage | null;
+}
+
+export interface PublicQuestion {
+  id: number;
+  question: string;
+  answer: string | null;
+  asked_at: string;
+  answered_at: string | null;
+  asked_by: string | null;
+}
+
+export interface PublicTimelineEvent {
+  id: number;
+  event_type: string;
+  summary: string;
+  created_at: string;
+  actor_name: string | null;
+}
+
+export interface PublicPhoto {
+  id: number;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  created_at: string;
 }
 
 /**
