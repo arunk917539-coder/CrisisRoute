@@ -9,9 +9,12 @@ Backend PC owns the only SQLite file. Do not start another backend on the second
 On the backend/responder PC, open separate PowerShell terminals at the repository root:
 
 ```powershell
+.\scripts\New-CrisisRouteAdmin.ps1 -Username admin -DatabasePath .demo\rehearsal.db
 .\scripts\Start-CrisisRoute.ps1 -Service backend -DatabasePath .demo\rehearsal.db
 .\scripts\Start-CrisisRoute.ps1 -Service admin
 ```
+
+Run the administrator command once, choose a password of at least 12 characters, and sign in at the responder portal. It must point at the same database as the backend. Existing accounts are preserved by the controlled demo reset.
 
 On the citizen PC (replace `192.168.1.20` with the backend PC's actual Wi-Fi/Ethernet IPv4):
 
@@ -39,7 +42,7 @@ Direct browser-to-backend API use is optional: set `VITE_API_BASE_URL=http://BAC
 
 ## Controlled synthetic data
 
-Use an isolated database. The existing seed command is intentionally a reset: it deletes all records in the selected database. Stop the backend before resetting and only point it at the rehearsal file:
+Use an isolated database. The seed command is intentionally a reset: it deletes operational reports, needs, relationships, allocations, deliveries, questions, photos and audit events in the selected database, while preserving accounts and sessions. Stop the backend before resetting and only point it at the rehearsal file. Uploaded files referenced by those photo records are also removed:
 
 ```powershell
 $env:CRISISROUTE_DATABASE_URL = 'sqlite:///C:/path/to/CrisisRoute/.demo/rehearsal.db'
@@ -50,7 +53,7 @@ Create `.demo` first if needed. Start the backend with that same database path. 
 
 ## Core acceptance walkthrough
 
-1. Keep responder incoming reports open, then submit a citizen relief request: category **Potable Drinking Water**, description **Residents in the affected area require drinking water. [SYNTHETIC DEMO]**, 100 units, and an explicit location pin or manual coordinates. Save its `CR-...` ID.
+1. Sign in and keep responder incoming reports open, then submit a citizen relief request: category **Potable Drinking Water**, description **Residents in the affected area require drinking water. [SYNTHETIC DEMO]**, 100 units, and an explicit location pin or manual coordinates. Save its `CR-...` ID and private access key.
 2. Within about five seconds, find the same report in the responder list and on the map. Open details and inspect priority, timestamps, source/context and freshness. A nearby repeated report with the same category/location demonstrates the advisory duplicate comparison.
 3. Record an evidence review, then explicitly accept/verify 100 units. Relationship decisions alone do not verify the report.
 4. Create matching **drinking water** inventory, using the same unit as the verified need. Allocate 50 units and record a linked delivery of 50.
@@ -58,11 +61,13 @@ Create `.demo` first if needed. Start the backend with that same database path. 
 6. The citizen tracking page should update automatically to **Partially Delivered** and show the same 50-unit gap. Allocate/deliver the remainder to resolve it.
 7. On separate reports, demonstrate rejected and unresolved decisions and their public notes. An emergency report can be reviewed and verified without creating a quantity-based relief need.
 
+The [feature walkthrough](FEATURES.md) adds private photos, citizen replies, grouped incidents, timelines, draft recovery, stale reconfirmation, role restrictions and optional local AI comparison.
+
 ## Offline / degraded service behavior
 
 The core API, database, review, coverage and polling work without an AI service or cloud account. Leaflet's base map tiles need internet; pin/coordinate fields and the request list remain the fallback. Address search uses Nominatim, optional resource routes use OSRM, and nearby landmark lookup uses Overpass. Failure of these services must not prevent submission or human review. Landmark and route results are reference data, not verified shelters or disaster-safe routing.
 
-If the backend disconnects, use visible error/last-refresh indicators; do not assume a failed or timed-out submission was lost. Check its tracking ID/list before retrying if the result is uncertain. Reports use browser-held tracking IDs, with no authenticated citizen identity or confidential case access.
+If the backend disconnects, use visible error/last-refresh indicators; do not assume a failed or timed-out submission was lost. Check its tracking ID/list before retrying if the result is uncertain. New reports require a private tracking key stored on the citizen's browser. Anyone with that key and ID can access the report, so keep it private. Older reports remain read-only under their previous tracking behavior. There is no automatic lost-key recovery.
 
 ## Checks before presenting
 
@@ -72,6 +77,7 @@ npm --prefix frontend run build
 npm --prefix frontend test
 npm --prefix admin-frontend run build
 npm --prefix admin-frontend run lint
+npm --prefix admin-frontend test
 ```
 
 Backend tests create a temporary database. Physical second-PC connectivity, firewall rules and browser permissions must be checked on the actual venue network. Local browser/proxy tests do not prove those conditions.

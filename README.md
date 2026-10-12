@@ -13,6 +13,14 @@ npm --prefix frontend ci
 npm --prefix admin-frontend ci
 ```
 
+Create the first administrator once (the password is entered privately at the prompt):
+
+```powershell
+.\scripts\New-CrisisRouteAdmin.ps1 -Username admin -DisplayName "Response Coordinator"
+```
+
+Use the same `-DatabasePath` with this command and the backend launcher if you select a rehearsal database. Sign in to the responder portal with that account. Administrators can create responder and read-only viewer accounts in **Manage team accounts**.
+
 From the repository root, use three terminals:
 
 ```powershell
@@ -34,5 +42,8 @@ See [the demo runbook](docs/DEMO_RUNBOOK.md) for exact LAN configuration, checks
 - [Pre-change feature audit](docs/INTEGRATION_AUDIT.md)
 - [Validation results](docs/VALIDATION.md)
 - [Demo runbook and acceptance walkthrough](docs/DEMO_RUNBOOK.md)
+- [New features, accounts, private photos, drafts and local AI setup](docs/FEATURES.md)
 
-Reconciliation uses deterministic offline lexical matching and contradiction rules; no LLM or embedding service is configured. Suggestions never verify a report or change quantities. Human review and explicit delivery recording control operational state. Maps use external services and reference routes are not verified safe routes. This prototype has no authentication, live responder/vehicle feed, verified shelter feed or photo storage; use controlled data on a trusted demo network.
+The system now includes unified incidents, follow-up questions, decision/delivery timelines, responder roles, private photo evidence, local drafts, reconfirmation reminders and optional local Ollama embeddings. Rule-based comparison works without a model. Suggestions never verify a report or change quantities; human review and explicit delivery recording control operational state.
+
+Maps use external services and reference routes are not verified safe routes. Live responder/vehicle tracking and verified shelter feeds are not implemented. Use controlled data on a trusted demo network; use HTTPS before carrying real credentials or reports beyond that environment.

@@ -1,4 +1,41 @@
-# Final integration validation
+# CrisisRoute validation
+
+## Feature expansion — completed 12 October 2026
+
+All eight capabilities in [FEATURES.md](FEATURES.md) are implemented: incident grouping, citizen follow-ups, linked timelines, accounts/roles, private photos, offline drafts, reconfirmation reminders and local Ollama comparison. All browser data described here is synthetic. Services used `.demo/features-browser.db` and `.demo/features-photos`; the original database was preserved.
+
+| Check | Observed result |
+|---|---|
+| Backend regression suite | **102 passed** across the full run and a targeted rerun; the initial run had 100 passes and two Windows temporary-directory setup errors, both passing with workspace-scoped TEMP/TMP |
+| Citizen production build and checks | Build passed; **25 tests passed** |
+| Responder production build, checks and lint | Build passed; **10 tests passed**; lint clean |
+| Evidence snapshot regression | Stale photo/reply versions rejected with 409; a refreshed version can be reviewed |
+| Actual local Ollama inference | `embeddinggemma:300m-qat-q4_0` ran locally; browser comparison returned an 83.2% semantic-similarity candidate |
+| Multilingual inference smoke check | English paraphrase and Hindi related description returned advisory matches; this is a smoke check, not a language-accuracy evaluation |
+| Original database preservation | SHA256 still matches the baseline value below |
+
+Backend tests retain one Starlette/AnyIO deprecation warning. Restricted sandbox loopback/process access prevented normal TestClient/service execution; approved execution outside the sandbox completed the checks. No failing application assertions remain.
+
+### Browser acceptance
+
+- Saved and restored a citizen draft, including exact coordinates; saved edits during an intentional backend outage without automatic submission.
+- Submitted CR-1 with a synthetic JPEG. Its private key, protected photo and submission timeline appeared in tracking and survived service restarts.
+- Asked follow-up questions as a responder and answered from citizen tracking. Both portals updated by polling; new replies invalidated the previous evidence review. The final version-aware review succeeded after the new reply and photo loaded.
+- Recorded a 25-unit delivery against the existing 100-unit verified need. Citizen tracking and incident details showed 25 delivered and 75 remaining.
+- Reconfirmed the older verified report; its stale reminder cleared while quantities and observation metadata remained unchanged.
+- Compared CR-1 to synthetic CR-2 using local Ollama through the UI. The candidate remained advisory. Explicitly accepting the duplicate relationship grouped two reports into one incident with one verified need, preserving 100 required / 25 delivered / 75 uncovered.
+- Created a synthetic viewer through account management and signed in. Account management was absent; resource and delivery writes were disabled. API permission enforcement is covered by regression tests.
+- Entered a wrong citizen key and confirmed private details disappeared with an access error. Reloading and searching with the previously saved valid key restored access.
+
+Browser evidence: `.demo/screenshots/features-incidents.png` shows both reports, the accepted relationship and the single need. Screenshots, credentials, private images, databases and model/runtime downloads are local rehearsal artifacts and excluded from the source ZIP.
+
+### Current limits
+
+Drafts work in an already loaded app; fresh offline page loads are not supported. AI is advisory and requires a separately installed local Ollama runtime/model. Production HTTPS, account recovery, physical second-PC/firewall checks, real-device GPS, and live responder/shelter feeds remain outside this prototype. See [FEATURES.md](FEATURES.md) for setup and detailed limits.
+
+## Initial integration baseline — 1 October 2026
+
+The following records the earlier integration before the feature expansion above. Its scope statements describe that historical version.
 
 Completed 1 October 2026. Work began with the 29 September audit and resumed after interruptions. All report examples below are controlled synthetic demonstrations, not real emergencies.
 
