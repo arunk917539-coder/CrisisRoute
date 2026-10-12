@@ -23,6 +23,10 @@ class RelationshipDecision(InputModel):
     decision: Literal["accept", "reject", "unresolved"]
 
 
+class EvidenceReview(InputModel):
+    evidence_version: str | None = Field(..., max_length=64)
+
+
 class ReportReview(InputModel):
     decision: Literal["accept", "reject", "unresolved"]
     note: str = Field(default="", max_length=1000)

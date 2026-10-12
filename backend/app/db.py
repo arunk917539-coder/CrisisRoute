@@ -47,6 +47,13 @@ def ensure_schema():
             conn.execute(text("ALTER TABLE reports ADD COLUMN review_note VARCHAR NOT NULL DEFAULT ''"))
         if "updated_at" not in report_columns:
             conn.execute(text("ALTER TABLE reports ADD COLUMN updated_at DATETIME"))
+        for name, column_type in (("tracking_token_hash", "VARCHAR"), ("evidence_updated_at", "DATETIME"), ("last_confirmed_at", "DATETIME")):
+            if name not in report_columns:
+                conn.execute(text(f"ALTER TABLE reports ADD COLUMN {name} {column_type}"))
+
+        audit_columns = {c["name"] for c in inspector.get_columns("audit_events")}
+        if "actor_name" not in audit_columns:
+            conn.execute(text("ALTER TABLE audit_events ADD COLUMN actor_name VARCHAR"))
 
         need_columns = {c["name"] for c in inspector.get_columns("needs")}
         if "unit" not in need_columns:

@@ -1,4 +1,4 @@
-from fastapi.testclient import TestClient
+from auth_client import AuthenticatedClient as TestClient
 from app.main import app
 from app.db import SessionLocal
 from app.models import Report, Need, Resource, Allocation, Delivery

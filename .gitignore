@@ -16,3 +16,4 @@ dist-ssr/
 .demo/
 backend/*.db-wal
 backend/*.db-shm
+backend/private_uploads/

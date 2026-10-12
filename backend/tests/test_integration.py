@@ -9,7 +9,7 @@ import sqlite3
 import subprocess
 import sys
 
-from fastapi.testclient import TestClient
+from auth_client import AuthenticatedClient as TestClient
 import pytest
 
 from app.db import DATABASE_PATH, DATABASE_URL, SessionLocal
@@ -71,7 +71,7 @@ def create_resource(quantity=100, category="drinking water", unit="bottles"):
 
 
 def lookup(request):
-    response = client.get(f"/public/requests/{request['request_id']}")
+    response = client.get(f"/public/requests/{request['request_id']}", headers={"X-Tracking-Token": request["tracking_token"]})
     assert response.status_code == 200
     return response.json()
 
@@ -286,7 +286,7 @@ def test_invalid_tracking_ids_do_not_crash(request_id):
 
 def test_public_batch_returns_only_requested_ids_and_is_citizen_safe():
     first, second = create_request(), create_request()
-    response = client.get("/public/requests", params={"request_ids": first["request_id"] + "," + first["request_id"]})
+    response = client.get("/public/requests", params={"request_ids": first["request_id"] + "," + first["request_id"]}, headers={"X-Tracking-Token": first["tracking_token"]})
     assert response.status_code == 200
     assert response.json()["count"] == 1
     public = response.json()["items"][0]
@@ -344,14 +344,16 @@ from app.main import app
 c=TestClient(app)
 r=c.post('/public/reports',json={'report_type':'relief','category':'water','description':'Water needed','location':'School','people_affected':1,'required_quantity':100})
 assert r.status_code==200,r.text
-print(r.json()['request_id'])
+print(r.json()['request_id'] + " " + r.json()['tracking_token'])
 '''
     created = subprocess.run([sys.executable, "-c", create_code], cwd=BACKEND_ROOT, env=env, capture_output=True, text=True, check=True)
-    assert created.stdout.strip() == "CR-1"
+    assert created.stdout.strip().split()[0] == "CR-1"
+    env["TEST_TRACKING_TOKEN"] = created.stdout.strip().split()[1]
     read_code = '''from fastapi.testclient import TestClient
 from app.main import app
 c=TestClient(app)
-assert c.get('/public/requests/CR-1').json()['required_quantity']==100
+import os
+assert c.get('/public/requests/CR-1',headers={'X-Tracking-Token':os.environ['TEST_TRACKING_TOKEN']}).json()['required_quantity']==100
 for origin in ('http://192.168.1.10:5173','http://192.168.1.20:5174'):
  r=c.options('/public/reports',headers={'Origin':origin,'Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'content-type'})
  assert r.status_code==200,r.text
@@ -397,7 +399,11 @@ def test_existing_database_schema_is_upgraded_without_losing_reports(tmp_path):
 from app.main import app
 from app.db import ensure_schema
 ensure_schema()
-row=TestClient(app).get('/reports/1').json()
+from app.models import Report
+from app.db import SessionLocal
+from app.main import report_response
+with SessionLocal() as db:
+ row=report_response(db,db.get(Report,1))
 assert row['description']=='Legacy water request'
 assert row['priority']=='medium'
 assert row['review_note']==''

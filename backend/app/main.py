@@ -1,11 +1,13 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 import os
+import secrets
 
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from .db import Base, engine, get_db, ensure_schema
@@ -27,13 +29,17 @@ from .schemas import (
     ResourceCreate,
     AllocationCreate,
     ReportReview,
+    EvidenceReview,
 )
 from .reconcile import suggest_relationship, normalized_category
+from .auth import router as auth_router, install_auth, current_actor, token_hash
+from .features import router as features_router, check_tracking
 
 
 ensure_schema()
 
 app = FastAPI(title="CrisisRoute API")
+install_auth(app)
 
 CORS_ORIGINS = [origin.strip().rstrip("/") for origin in os.environ.get(
     "CRISISROUTE_CORS_ORIGINS",
@@ -72,6 +78,7 @@ def audit(
             entity_type=entity_type,
             entity_id=entity_id,
             summary=summary,
+            actor_name=current_actor.get(),
         )
     )
 
@@ -83,9 +90,11 @@ def iso(dt):
 
 
 def evidence_was_reviewed(db: Session, report_id: int) -> bool:
-    return db.query(AuditEvent).filter_by(
+    latest = db.query(AuditEvent).filter_by(
         event_type="evidence_reviewed", entity_type="report", entity_id=report_id,
-    ).first() is not None
+    ).order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc()).first()
+    report = db.get(Report, report_id)
+    return bool(latest and (not report.evidence_updated_at or latest.created_at.replace(tzinfo=timezone.utc) >= report.evidence_updated_at.replace(tzinfo=timezone.utc)))
 
 
 def touch_report(report: Report):
@@ -163,6 +172,8 @@ def report_response(db: Session, report: Report):
         "reviewed_at": iso(report.reviewed_at),
         "review_note": report.review_note,
         "is_synthetic": report.is_synthetic,
+        "last_confirmed_at": iso(report.last_confirmed_at),
+        "can_contact_citizen": bool(report.tracking_token_hash),
     }
 
 
@@ -237,6 +248,7 @@ def public_request_response(
     need = db.query(Need).filter_by(report_id=report.id).first()
     return {
         "request_id": public_request_id(report.id),
+        "can_manage": bool(report.tracking_token_hash),
         "status": public_request_status(db, report),
         "report_type": report.report_type,
         "priority": report.priority,
@@ -288,7 +300,9 @@ def create_public_report(
             "Relief reports require a positive required_quantity",
         )
 
+    tracking_token = secrets.token_urlsafe(32)
     report = Report(
+        tracking_token_hash=token_hash(tracking_token),
         report_type=payload.report_type,
         category=category,
         description=description,
@@ -359,12 +373,13 @@ def create_public_report(
     db.commit()
     db.refresh(report)
 
-    return public_request_response(db, report)
+    return {**public_request_response(db, report), "tracking_token": tracking_token}
 
 
 @app.get("/public/requests/{request_id}")
 def get_public_request(
     request_id: str,
+    x_tracking_token: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
     report_id = parse_public_request_id(request_id)
@@ -374,6 +389,7 @@ def get_public_request(
     if not report:
         raise HTTPException(404, "Request not found")
 
+    check_tracking(report, x_tracking_token)
     return public_request_response(db, report)
 
 
@@ -383,6 +399,7 @@ def get_public_requests(
         ...,
         description="Comma-separated citizen request IDs such as CR-1,CR-3",
     ),
+    x_tracking_token: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
     """
@@ -421,6 +438,7 @@ def get_public_requests(
         .filter(Report.id.in_(report_ids))
         .all()
     ):
+        check_tracking(report, x_tracking_token)
         reports_by_id[report.id] = report
 
     missing_ids = [
@@ -620,18 +638,29 @@ def report_evidence(
         "freshness": freshness,
         "reviewed": evidence_was_reviewed(db, r.id),
         "human_review_required": not evidence_was_reviewed(db, r.id),
+        "evidence_version": iso(r.evidence_updated_at),
     }
 
 
 @app.post("/reports/{report_id}/evidence/review")
 def review_evidence(
     report_id: int,
+    payload: EvidenceReview | None = None,
     db: Session = Depends(get_db),
 ):
+    # Serialize the version check with photo/reply writes. Otherwise an upload
+    # could commit between checking the snapshot and acknowledging its review.
+    db.execute(update(Report).where(Report.id == report_id).values(updated_at=Report.updated_at))
     r = db.get(Report, report_id)
 
     if not r:
         raise HTTPException(404, "Report not found")
+
+    evidence_version = iso(r.evidence_updated_at)
+    # Older clients can acknowledge only the original, immutable report. Once
+    # evidence has been appended, a version from the displayed snapshot is required.
+    if (payload.evidence_version if payload else None) != evidence_version:
+        raise HTTPException(409, "Evidence changed since it was loaded. Refresh and inspect the new replies and photos before marking it reviewed.")
 
     existing = (
         db.query(AuditEvent)
@@ -643,7 +672,7 @@ def review_evidence(
         .first()
     )
 
-    if existing:
+    if existing and evidence_was_reviewed(db, r.id):
         return {
             "report_id": r.id,
             "reviewed": True,
@@ -855,6 +884,7 @@ def verify_relief_need(db: Session, report: Report, quantity: float, unit: str):
     need = Need(report_id=report.id, verified_quantity=quantity, unit=unit.strip())
     report.verification_status = "verified"
     report.reviewed_at = datetime.now(timezone.utc)
+    report.last_confirmed_at = report.reviewed_at
     touch_report(report)
     db.add(need)
     db.flush()
@@ -896,6 +926,7 @@ def review_report(report_id: int, payload: ReportReview, db: Session = Depends(g
         elif payload.verified_quantity is not None:
             raise HTTPException(422, "Emergency verification does not create a quantity-based need")
         report.verification_status = "verified"
+        report.last_confirmed_at = datetime.now(timezone.utc)
     else:
         if need is not None:
             raise HTTPException(409, "A report with a verified need cannot be rejected or marked unresolved")
@@ -1392,3 +1423,7 @@ def audit_log(
         }
         for x in rows
     ]
+
+
+app.include_router(auth_router)
+app.include_router(features_router)

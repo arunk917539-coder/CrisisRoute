@@ -1,10 +1,16 @@
 from datetime import datetime, timedelta, timezone
 from app.db import SessionLocal, ensure_schema
-from app.models import Report, Relationship, Need, Delivery, Resource, Allocation, AuditEvent
+from app.models import Report, Relationship, Need, Delivery, Resource, Allocation, AuditEvent, Photo, FollowupQuestion
 
 
 def reset_demo_data(db):
     # Delete child records before parent records so repeated resets are safe.
+    # Private evidence references must not survive a report reset.
+    from app.features import photo_directory
+    for photo in db.query(Photo).all():
+        (photo_directory() / photo.storage_name).unlink(missing_ok=True)
+    db.query(Photo).delete()
+    db.query(FollowupQuestion).delete()
     db.query(Delivery).delete()
     db.query(Allocation).delete()
     db.query(Need).delete()

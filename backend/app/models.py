@@ -25,6 +25,9 @@ class Report(Base):
     reviewed_at = Column(DateTime, nullable=True)
     review_note = Column(String, nullable=False, default="")
     is_synthetic = Column(Boolean, nullable=False, default=True)
+    tracking_token_hash = Column(String, nullable=True)
+    evidence_updated_at = Column(DateTime, nullable=True)
+    last_confirmed_at = Column(DateTime, nullable=True)
 
 class Relationship(Base):
     __tablename__ = "relationships"
@@ -89,4 +92,45 @@ class AuditEvent(Base):
     entity_type = Column(String, nullable=False)
     entity_id = Column(Integer, nullable=False)
     summary = Column(String, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    actor_name = Column(String, nullable=True)
+
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True)
+    username = Column(String, nullable=False, unique=True)
+    display_name = Column(String, nullable=False)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    token_hash = Column(String, nullable=False, unique=True)
+    expires_at = Column(DateTime, nullable=False)
+
+
+class FollowupQuestion(Base):
+    __tablename__ = "followup_questions"
+    id = Column(Integer, primary_key=True)
+    report_id = Column(Integer, ForeignKey("reports.id"), nullable=False)
+    question = Column(String, nullable=False)
+    answer = Column(String, nullable=True)
+    asked_by = Column(String, nullable=False)
+    asked_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    answered_at = Column(DateTime, nullable=True)
+
+
+class Photo(Base):
+    __tablename__ = "photos"
+    id = Column(Integer, primary_key=True)
+    report_id = Column(Integer, ForeignKey("reports.id"), nullable=False)
+    filename = Column(String, nullable=False)
+    storage_name = Column(String, nullable=False, unique=True)
+    content_type = Column(String, nullable=False)
+    size_bytes = Column(Integer, nullable=False)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))

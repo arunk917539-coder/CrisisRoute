@@ -12,6 +12,8 @@ os.environ["CRISISROUTE_DATABASE_URL"] = (
     "sqlite:///" + (Path(_test_database.name) / "test.db").as_posix()
 )
 
+os.environ["CRISISROUTE_PHOTO_DIR"] = str(Path(_test_database.name) / "photos")
+
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
