@@ -41,7 +41,7 @@ $env:VITE_API_BASE_URL = '/api'
 $env:CRISISROUTE_API_TARGET = $BackendUrl.TrimEnd('/')
 $frontendDir = if ($Service -eq 'citizen') { 'frontend' } else { 'admin-frontend' }
 $frontendPort = if ($Service -eq 'citizen') { 5173 } else { 5174 }
-Write-Host "Open http://localhost:$frontendPort — API proxy: $env:CRISISROUTE_API_TARGET"
+Write-Host "Open http://localhost:$frontendPort - API proxy: $env:CRISISROUTE_API_TARGET"
 Push-Location (Join-Path $projectRoot $frontendDir)
 try { & npm.cmd run dev; exit $LASTEXITCODE }
 finally { Pop-Location }
